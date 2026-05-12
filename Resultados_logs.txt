@@ -1,0 +1,151 @@
+======================================================================
+  PAD — Treinamento Federado (Modo COMPLETO com extração)
+  Shards: 4
+  Workers: 12
+  Rounds: 6
+  N trees: 200
+======================================================================
+  Modo: FULL
+
+
+──────────────────────────────────────────────────
+  Round FL 1/6
+──────────────────────────────────────────────────
+  [W3] R1 | fluxos=31,832 | anomalias=1,592 (5.00%) | class=0.79s
+  [W2] R1 | fluxos=36,294 | anomalias=1,815 (5.00%) | class=0.84s
+  [W1] R1 | fluxos=38,286 | anomalias=1,915 (5.00%) | class=0.90s
+  [W0] R1 | fluxos=40,287 | anomalias=2,015 (5.00%) | class=0.91s
+
+  Fluxos totais : 146,699
+  Anomalias     : 7,337  (5.00%)
+  Tempo paralelo: 2159.1s
+  Speedup S(N)  : 4.07×
+  Eficiência    : 33.9%
+  Desbalance    : 16.8%
+
+──────────────────────────────────────────────────
+  Round FL 2/6
+──────────────────────────────────────────────────
+  [W3] R2 | fluxos=31,832 | anomalias=1,592 (5.00%) | class=0.51s
+  [W2] R2 | fluxos=36,294 | anomalias=1,815 (5.00%) | class=0.58s
+  [W1] R2 | fluxos=38,286 | anomalias=1,915 (5.00%) | class=0.62s
+  [W0] R2 | fluxos=40,287 | anomalias=2,015 (5.00%) | class=0.64s
+
+  Fluxos totais : 146,699
+  Anomalias     : 7,337  (5.00%)
+  Tempo paralelo: 2229.0s
+  Speedup S(N)  : 4.10×
+  Eficiência    : 34.1%
+  Desbalance    : 17.1%
+
+──────────────────────────────────────────────────
+  Round FL 3/6
+──────────────────────────────────────────────────
+  [W3] R3 | fluxos=31,832 | anomalias=1,592 (5.00%) | class=0.54s
+  [W2] R3 | fluxos=36,294 | anomalias=1,815 (5.00%) | class=0.59s
+  [W1] R3 | fluxos=38,286 | anomalias=1,915 (5.00%) | class=0.62s
+  [W0] R3 | fluxos=40,287 | anomalias=2,015 (5.00%) | class=0.67s
+
+  Fluxos totais : 146,699
+  Anomalias     : 7,337  (5.00%)
+  Tempo paralelo: 2273.8s
+  Speedup S(N)  : 4.09×
+  Eficiência    : 34.1%
+  Desbalance    : 17.2%
+
+──────────────────────────────────────────────────
+  Round FL 4/6
+──────────────────────────────────────────────────
+  [W3] R4 | fluxos=31,832 | anomalias=1,592 (5.00%) | class=0.56s
+  [W2] R4 | fluxos=36,294 | anomalias=1,815 (5.00%) | class=0.60s
+  [W1] R4 | fluxos=38,286 | anomalias=1,915 (5.00%) | class=0.63s
+  [W0] R4 | fluxos=40,287 | anomalias=2,015 (5.00%) | class=0.64s
+
+  Fluxos totais : 146,699
+  Anomalias     : 7,337  (5.00%)
+  Tempo paralelo: 2326.4s
+  Speedup S(N)  : 4.07×
+  Eficiência    : 33.9%
+  Desbalance    : 18.1%
+
+──────────────────────────────────────────────────
+  Round FL 5/6
+──────────────────────────────────────────────────
+  [W3] R5 | fluxos=31,832 | anomalias=1,591 (5.00%) | class=0.52s
+  [W2] R5 | fluxos=36,294 | anomalias=1,815 (5.00%) | class=0.58s
+  [W1] R5 | fluxos=38,286 | anomalias=1,915 (5.00%) | class=0.62s
+  [W0] R5 | fluxos=40,287 | anomalias=2,015 (5.00%) | class=0.66s
+
+  Fluxos totais : 146,699
+  Anomalias     : 7,336  (5.00%)
+  Tempo paralelo: 2284.1s
+  Speedup S(N)  : 4.08×
+  Eficiência    : 34.0%
+  Desbalance    : 17.1%
+
+──────────────────────────────────────────────────
+  Round FL 6/6
+──────────────────────────────────────────────────
+  [W3] R6 | fluxos=31,832 | anomalias=1,592 (5.00%) | class=0.52s
+  [W2] R6 | fluxos=36,294 | anomalias=1,815 (5.00%) | class=0.60s
+  [W1] R6 | fluxos=38,286 | anomalias=1,915 (5.00%) | class=0.62s
+  [W0] R6 | fluxos=40,287 | anomalias=2,015 (5.00%) | class=0.65s
+
+  Fluxos totais : 146,699
+  Anomalias     : 7,337  (5.00%)
+  Tempo paralelo: 2271.5s
+  Speedup S(N)  : 4.07×
+  Eficiência    : 33.9%
+  Desbalance    : 17.5%
+
+======================================================================
+  Treinamento concluído em 13543.9s
+  Modo: FULL
+  Resultados salvos em: /data/results/cpu_federated_results.pkl
+======================================================================
+======================================================================
+  Benchmark GPU (cuML) — Modo COMPLETO (com extração)
+  Shards: 4
+  N estimadores: 400
+======================================================================
+  [EXTRACT] /data/pcaps/shard__00091_20260414170212.pcapng | flows=40,287 | t=2090.4s
+  [EXTRACT] /data/pcaps/shard__00092_20260414170229.pcapng | flows=38,286 | t=2075.4s
+  [EXTRACT] /data/pcaps/shard__00093_20260414170247.pcapng | flows=36,294 | t=2036.7s
+  [EXTRACT] /data/pcaps/shard__00094_20260414170303.pcapng | flows=31,832 | t=1785.2s
+
+  Modo: FULL
+  Fluxos carregados: 146,699
+  Features: 22
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+  MEDINDO CLASSIFICAÇÃO...
+  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─  ─
+
+  [WARN] GPU indisponível, usando fallback CPU: cannot import name 'IsolationForest' from 'cuml.ensemble' (/usr/local/lib/python3.10/dist-packages/cuml/ensemble/__init__.py)
+
+======================================================================
+  Backend: cpu-fallback
+  Modo: FULL
+  Fluxos: 146,699
+  Anomalias: 7,335 (5.00%)
+  ────────────────────────────────────────────────────────────────────
+  Extração: 7987.8s (não medido em modo cache)
+  Treino: 2.3s
+  Inferência: 2.9s
+  ► Classificação (train+infer): 7.7s ◄ [MÉTRICA]
+  Total (incl. extração): 7995.4s
+  Resultado: /data/results/gpu_results.pkl
+======================================================================
+
+======================================================================
+  Gráficos gerados com sucesso!
+  PNG: /data/results/cpu_gpu_comparison.png
+  PDF: /data/results/cpu_gpu_comparison.pdf
+======================================================================
+
+  Resumo da Comparação:
+  ─────────────────────
+  Modo: TOTAL (inclui extração)
+  CPU (full): 13543.9s
+  GPU (full): 8126.3s
+  Speedup: 1.67×
+======================================================================

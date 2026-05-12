@@ -1,0 +1,9 @@
+pyshark
+pandas
+numpy
+scikit-learn
+scipy
+tqdm
+matplotlib
+streamlit
+psutil
