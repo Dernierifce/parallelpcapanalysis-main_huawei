@@ -208,7 +208,7 @@ with st.expander("Upload e Processamento Rápido", expanded=True):
         key="quick_upload",
     )
 
-    if st.button("Salvar upload rápido", use_container_width=True, key="quick_save_button"):
+    if st.button("Salvar upload rápido", width="stretch", key="quick_save_button"):
         if not quick_uploaded:
             st.warning("Nenhum arquivo selecionado no upload rápido.")
         else:
@@ -227,7 +227,7 @@ with st.expander("Upload e Processamento Rápido", expanded=True):
     quick_chart_base = col_q3.text_input("Nome do chart", value="cpu_gpu_comparison", key="quick_chart_base")
 
     cqa, cqb, cqc = st.columns(3)
-    if cqa.button("Executar CPU (4 workers)", use_container_width=True, key="quick_run_cpu"):
+    if cqa.button("Executar CPU (4 workers)", width="stretch", key="quick_run_cpu"):
         if not quick_files:
             st.error("Nenhum PCAP disponível para treino CPU.")
         else:
@@ -255,7 +255,7 @@ with st.expander("Upload e Processamento Rápido", expanded=True):
             else:
                 st.error(f"Falha no CPU rápido (exit code {code}).")
 
-    if cqb.button("Executar GPU", use_container_width=True, key="quick_run_gpu"):
+    if cqb.button("Executar GPU", width="stretch", key="quick_run_gpu"):
         if not quick_files:
             st.error("Nenhum PCAP disponível para benchmark GPU.")
         else:
@@ -280,7 +280,7 @@ with st.expander("Upload e Processamento Rápido", expanded=True):
             else:
                 st.error(f"Falha no GPU rápido (exit code {code}).")
 
-    if cqc.button("Gerar chart CPU x GPU", use_container_width=True, key="quick_run_chart"):
+    if cqc.button("Gerar chart CPU x GPU", width="stretch", key="quick_run_chart"):
         args = [
             "plots_cpu_gpu_compare.py",
             "--cpu-results",
@@ -333,7 +333,7 @@ with tab_hw:
                 }
             ]
         ),
-        use_container_width=True,
+        width="stretch",
     )
 
     st.subheader("Inventário de GPU")
@@ -341,7 +341,7 @@ with tab_hw:
         st.warning("nvidia-smi não encontrado no container.")
     elif gpu["rows"]:
         gpu_df = pd.DataFrame(gpu["rows"])
-        st.dataframe(gpu_df, use_container_width=True)
+        st.dataframe(gpu_df, width="stretch")
         st.bar_chart(gpu_df.set_index("name")[["memory_used_gb", "memory_free_gb", "util_gpu_pct"]])
     else:
         st.info("GPU habilitada, mas sem linhas retornadas por nvidia-smi.")
@@ -360,7 +360,7 @@ with tab_data:
         accept_multiple_files=True,
     )
 
-    if st.button("Salvar arquivos no volume", use_container_width=True):
+    if st.button("Salvar arquivos no volume", width="stretch"):
         if not uploaded:
             st.warning("Nenhum arquivo selecionado.")
         else:
@@ -380,7 +380,7 @@ with tab_data:
             }
             for p in files
         ]
-        st.dataframe(pd.DataFrame(listing), use_container_width=True)
+        st.dataframe(pd.DataFrame(listing), width="stretch")
     else:
         st.warning("Nenhum PCAP no volume ainda.")
 
@@ -399,7 +399,7 @@ with tab_cpu:
     contamination = st.slider("Contamination", min_value=0.001, max_value=0.3, value=0.05, step=0.001)
     cpu_outfile = st.text_input("Arquivo de saída CPU", value="cpu_federated_results.pkl")
 
-    if st.button("Rodar treino federado CPU", use_container_width=True):
+    if st.button("Rodar treino federado CPU", width="stretch"):
         if not selected_cpu:
             st.error("Selecione ao menos um arquivo PCAP.")
         else:
@@ -441,7 +441,7 @@ with tab_gpu:
     gpu_outfile = st.text_input("Arquivo de saída GPU", value="gpu_results.pkl")
     cpu_fallback = st.checkbox("Permitir fallback para CPU se cuML falhar", value=True)
 
-    if st.button("Rodar benchmark GPU", use_container_width=True):
+    if st.button("Rodar benchmark GPU", width="stretch"):
         if not selected_gpu:
             st.error("Selecione ao menos um arquivo PCAP.")
         else:
@@ -476,7 +476,7 @@ with tab_methods:
         "Selecione shards para pré-processamento (cache)", options=[str(p) for p in files], default=[str(p) for p in files[:4]]
     )
     cache_name = st.text_input("Nome do arquivo de cache", value="features_cache.pkl")
-    if st.button("Gerar cache de features (pré-processar)", use_container_width=True):
+    if st.button("Gerar cache de features (pré-processar)", width="stretch"):
         if not selected:
             st.error("Selecione ao menos um shard para pré-processamento.")
         else:
@@ -504,7 +504,7 @@ with tab_methods:
         default=["IsolationForest (GPU)"],
     )
     out_base = st.text_input("Prefixo de saída para resultados", value="run_")
-    run_btn = st.button("Executar métodos selecionados", use_container_width=True)
+    run_btn = st.button("Executar métodos selecionados", width="stretch")
     if run_btn:
         cache_path = RESULTS_DIR / cache_name
         if not cache_path.exists():
@@ -583,7 +583,7 @@ with tab_charts:
     gpu_file = st.text_input("Resultado GPU (.pkl)", value=str(RESULTS_DIR / "gpu_results.pkl"))
     base_name = st.text_input("Nome base do chart", value="cpu_gpu_comparison")
 
-    if st.button("Gerar chart CPU x GPU", use_container_width=True):
+    if st.button("Gerar chart CPU x GPU", width="stretch"):
         args = [
             "plots_cpu_gpu_compare.py",
             "--cpu-results",
