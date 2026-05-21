@@ -19,6 +19,35 @@ Projeto para análise de tráfego de rede em PCAP com foco em comparar o custo c
 - data/pcaps/: local para capturas de rede usadas no pipeline.
 - data/results/: local para caches, métricas e saídas geradas.
 
+## Acesso aos dados
+
+Este projeto usa volumes nomeados do Docker:
+
+- `pcap_data` montado em `/data/pcaps`
+- `results_data` montado em `/data/results`
+
+Dentro do container, os arquivos ficam nesses caminhos. Fora do container, você acessa os dados de uma destas formas:
+
+1. Pelo Portainer, abrindo o container ou a stack e navegando em `Volumes`.
+2. Via terminal no host, com comandos como:
+
+```bash
+docker volume ls
+docker volume inspect parallelpcapanalysis-main_huawei_results_data
+docker volume inspect parallelpcapanalysis-main_huawei_pcap_data
+```
+
+3. Entrando no container e lendo os diretórios montados:
+
+```bash
+docker exec -it parallelpcapanalysis-dashboard bash
+ls -lah /data
+ls -lah /data/pcaps
+ls -lah /data/results
+```
+
+Se você quiser acessar os arquivos como pastas normais no Windows/Linux, podemos trocar os volumes nomeados por bind mounts apontando para um diretório fixo no host.
+
 ## Dependências
 
 Instale as dependências principais com:
