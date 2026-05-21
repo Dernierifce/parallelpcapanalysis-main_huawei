@@ -50,8 +50,8 @@ Se preferir usar um caminho absoluto no host, você pode editar `docker-compose.
 services:
 	dashboard:
 		volumes:
-			- C:/path/to/parallelpcapanalysis-main_huawei/data/pcaps:/data/pcaps
-			- C:/path/to/parallelpcapanalysis-main_huawei/data/results:/data/results
+			- C:/Users/dernier.bruno/docker/Resultados/pcaps:/data/pcaps
+			- C:/Users/dernier.bruno/docker/Resultados/results:/data/results
 ```
 
 Observação: após trocar para bind mounts, os arquivos gerados e os caches ficarão no sistema de arquivos do host, facilitando inspeção, backup e edição fora do container.
