@@ -38,7 +38,32 @@ DEFAULT_OUTFILE = "gpu_results.pkl"
 
 def _train_gpu_cuml(X_scaled: np.ndarray, n_estimators: int, contamination: float):
     import cupy as cp
-    from cuml.ensemble import IsolationForest as CuIsolationForest
+
+    CuIsolationForest = None
+    import_errors = []
+
+    for import_path in (
+        "cuml.IsolationForest",
+        "cuml.ensemble.IsolationForest",
+        "cuml.ensemble.isolation_forest.IsolationForest",
+    ):
+        try:
+            if import_path == "cuml.IsolationForest":
+                from cuml import IsolationForest as CuIsolationForest
+            elif import_path == "cuml.ensemble.IsolationForest":
+                from cuml.ensemble import IsolationForest as CuIsolationForest
+            else:
+                from cuml.ensemble.isolation_forest import IsolationForest as CuIsolationForest
+            break
+        except ImportError as exc:
+            import_errors.append(f"{import_path}: {exc}")
+
+    if CuIsolationForest is None:
+        raise ImportError(
+            "cuML não expõe IsolationForest nesta instalação. "
+            "Tente uma build/versão compatível ou use --allow-cpu-fallback. "
+            f"Tentativas: {' | '.join(import_errors)}"
+        )
 
     X_gpu = cp.asarray(X_scaled.astype(np.float32, copy=False))
     model = CuIsolationForest(
@@ -88,7 +113,12 @@ def main():
     parser.add_argument("--outfile", default=DEFAULT_OUTFILE)
     parser.add_argument("--estimators", type=int, default=400)
     parser.add_argument("--contamination", type=float, default=0.05)
-    parser.add_argument("--allow-cpu-fallback", action="store_true")
+    parser.add_argument(
+        "--allow-cpu-fallback",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Permite fallback para CPU se o backend GPU/cuML não estiver disponível.",
+    )
     args = parser.parse_args()
 
     if not args.shards and not args.cache_file:
@@ -158,8 +188,8 @@ def main():
     # ── CLASSIFICAÇÃO: Treino + Inferência ──────────────────────────────
     classification_start = time.perf_counter()
 
-    backend = "gpu-cuml"
     try:
+        backend = "gpu-cuml"
         scores, labels, train_time, infer_time = _train_gpu_cuml(
             X_scaled,
             n_estimators=args.estimators,
