@@ -83,6 +83,18 @@ Para build sem pacotes GPU, use:
 docker compose build --build-arg INSTALL_GPU_PACKAGES=0
 ```
 
+## Portainer
+
+Para atualizar automaticamente no Portainer:
+
+1. Publique este repositório no GitHub.
+2. No Portainer, crie a stack usando a opção de Git repository.
+3. Aponte para este `docker-compose.yml` e use o branch `main`.
+4. Ative o webhook da stack no Portainer.
+5. Em cada `git push`, acione o redeploy via webhook para o Portainer puxar as mudanças.
+
+Como este compose ainda usa `build:`, o Portainer recompõe a imagem a partir do repositório atualizado. Se você quiser usar uma imagem publicada em registry, podemos trocar o `build:` por `image:` em um segundo passo.
+
 ## Observação
 
 A comparação principal usa classification_s, que mede treino + inferência. Quando o cache é usado, a extração fica fora da métrica para permitir comparação mais justa entre métodos.

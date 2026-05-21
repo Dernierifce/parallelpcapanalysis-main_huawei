@@ -23,6 +23,9 @@ services:
     stdin_open: true
     tty: true
 
+    # Portainer: quando a stack for implantada a partir de Git, o webhook pode
+    # fazer o redeploy automático sempre que houver push no branch usado pela stack.
+
 volumes:
   pcap_data:
   results_data:
