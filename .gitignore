@@ -41,6 +41,16 @@ Thumbs.db
 
 # Logs
 *.log
+Resultados_logs.txt
+
+# Resultados gerados
+*.pkl
+*.png
+*.pdf
+
+# Capturas de rede locais
+*.pcap
+*.pcapng
 
 # dotenv
 .env
