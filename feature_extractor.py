@@ -15,6 +15,11 @@ import hashlib
 import warnings
 warnings.filterwarnings("ignore")
 
+try:
+    from pyshark.capture.capture import TSharkCrashException
+except Exception:
+    TSharkCrashException = Exception
+
 # ── Features extraídas por fluxo ──────────────────────────────
 FEATURE_COLS = [
     "duration", "proto",
@@ -52,62 +57,76 @@ def extract_flows(pcap_path: str, anonymize: bool = True) -> pd.DataFrame:
     cap = pyshark.FileCapture(pcap_path, keep_packets=False)
     flows: dict = {}
 
-    for pkt in cap:
-        try:
-            if not hasattr(pkt, "ip") or not hasattr(pkt, "transport_layer"):
-                continue
-            proto = pkt.transport_layer
-            src_ip = pkt.ip.src
-            dst_ip = pkt.ip.dst
-            sp = int(getattr(pkt[proto], "srcport", 0))
-            dp = int(getattr(pkt[proto], "dstport", 0))
-            ts = float(pkt.sniff_timestamp)
-            size = int(pkt.length)
+    try:
+        for pkt in cap:
+            try:
+                if not hasattr(pkt, "ip") or not hasattr(pkt, "transport_layer"):
+                    continue
+                proto = pkt.transport_layer
+                src_ip = pkt.ip.src
+                dst_ip = pkt.ip.dst
+                sp = int(getattr(pkt[proto], "srcport", 0))
+                dp = int(getattr(pkt[proto], "dstport", 0))
+                ts = float(pkt.sniff_timestamp)
+                size = int(pkt.length)
 
-            # Anonimização
-            if anonymize:
-                src_key = _anonymize_ip(src_ip)
-                dst_key = _anonymize_ip(dst_ip)
-            else:
-                src_key, dst_key = src_ip, dst_ip
+                # Anonimização
+                if anonymize:
+                    src_key = _anonymize_ip(src_ip)
+                    dst_key = _anonymize_ip(dst_ip)
+                else:
+                    src_key, dst_key = src_ip, dst_ip
 
-            key = (src_key, dst_key, sp, dp, proto)
+                key = (src_key, dst_key, sp, dp, proto)
 
-            if key not in flows:
-                flows[key] = dict(
-                    t_start=ts, t_last=ts,
-                    pkts=[size], iats=[],
-                    flags_syn=0, flags_fin=0, flags_rst=0, flags_psh=0,
-                    fwd_bytes=0, bwd_bytes=0,
-                    fwd_pkts=0, bwd_pkts=0,
-                    total_bytes=0,
-                )
-            else:
+                if key not in flows:
+                    flows[key] = dict(
+                        t_start=ts, t_last=ts,
+                        pkts=[size], iats=[],
+                        flags_syn=0, flags_fin=0, flags_rst=0, flags_psh=0,
+                        fwd_bytes=0, bwd_bytes=0,
+                        fwd_pkts=0, bwd_pkts=0,
+                        total_bytes=0,
+                    )
+                else:
+                    f = flows[key]
+                    f["iats"].append(ts - f["t_last"])
+                    f["t_last"] = ts
+                    f["pkts"].append(size)
+
                 f = flows[key]
-                f["iats"].append(ts - f["t_last"])
-                f["t_last"] = ts
-                f["pkts"].append(size)
+                f["total_bytes"] += size
+                f["fwd_pkts"] += 1
+                f["fwd_bytes"] += size
 
-            f = flows[key]
-            f["total_bytes"] += size
-            f["fwd_pkts"] += 1
-            f["fwd_bytes"] += size
+                # Flags TCP
+                if proto == "TCP":
+                    try:
+                        flags = int(pkt.tcp.flags, 16)
+                        f["flags_syn"] += int(bool(flags & 0x02))
+                        f["flags_fin"] += int(bool(flags & 0x01))
+                        f["flags_rst"] += int(bool(flags & 0x04))
+                        f["flags_psh"] += int(bool(flags & 0x08))
+                    except Exception:
+                        pass
 
-            # Flags TCP
-            if proto == "TCP":
-                try:
-                    flags = int(pkt.tcp.flags, 16)
-                    f["flags_syn"] += int(bool(flags & 0x02))
-                    f["flags_fin"] += int(bool(flags & 0x01))
-                    f["flags_rst"] += int(bool(flags & 0x04))
-                    f["flags_psh"] += int(bool(flags & 0x08))
-                except Exception:
-                    pass
-
-        except AttributeError:
-            continue
-
-    cap.close()
+            except AttributeError:
+                continue
+    finally:
+        try:
+            cap.close()
+        except TSharkCrashException as exc:
+            warnings.warn(
+                f"TShark crashed while closing capture for {pcap_path}: {exc}. "
+                "Returning the flows parsed before the crash.",
+                RuntimeWarning,
+            )
+        except Exception as exc:
+            warnings.warn(
+                f"Unexpected error while closing capture for {pcap_path}: {exc}. "
+                "Returning the flows parsed before the close failure.",
+                RuntimeWarning,
+            )
 
     records = []
     for (src, dst, sp, dp, proto), f in flows.items():
