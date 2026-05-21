@@ -1,0 +1,3 @@
+Teste de bind mount — criado em 2026-05-21 por assistant
+
+Conteúdo de verificação: este arquivo confirma que a pasta `data/pcaps` no host está acessível para o container.
