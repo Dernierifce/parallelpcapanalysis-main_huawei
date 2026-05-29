@@ -6,14 +6,14 @@ com o pipeline federado em CPU.
 Modos:
     1. Com CACHE (recomendado para focar em classificação):
        python gpu_train.py \
-           --cache-file /data/results/features_cache.pkl \
-           --outdir /data/results \
+           --cache-file ./data/results/features_cache.pkl \
+           --outdir ./data/results \
            --outfile gpu_results.pkl
     
     2. Sem cache (modo legado — inclui extração):
        python gpu_train.py \
-           --shards /data/pcaps/*.pcapng \
-           --outdir /data/results \
+           --shards ./data/pcaps/*.pcapng \
+           --outdir ./data/results \
            --outfile gpu_results.pkl
 
 Nota: modo com --cache-file isola medição APENAS de classificação (train + infer)
@@ -31,8 +31,9 @@ from sklearn.preprocessing import StandardScaler
 
 from feature_extractor import FEATURE_COLS, extract_flows
 
-DEFAULT_SHARDS = sorted(glob.glob("/data/pcaps/*.pcapng"))
-DEFAULT_OUTDIR = "/data/results"
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_SHARDS = sorted(glob.glob(str(BASE_DIR / "data" / "pcaps" / "*.pcapng")))
+DEFAULT_OUTDIR = str(BASE_DIR / "data" / "results")
 DEFAULT_OUTFILE = "gpu_results.pkl"
 
 

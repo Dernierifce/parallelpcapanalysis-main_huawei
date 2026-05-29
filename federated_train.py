@@ -5,16 +5,16 @@ Pipeline federado não supervisionado com IsolationForest + FedAvg.
 Modos:
     1. Com CACHE (recomendado para focar em classificação):
        python federated_train.py \
-           --cache-file /data/results/features_cache.pkl \
-           --outdir /data/results \
+           --cache-file ./data/results/features_cache.pkl \
+           --outdir ./data/results \
            --rounds 6 \
            --workers 4 \
            --outfile cpu_federated_results.pkl
     
     2. Sem cache (modo legado — inclui extração):
        python federated_train.py \
-           --shards /data/pcaps/*.pcapng \
-           --outdir /data/results \
+           --shards ./data/pcaps/*.pcapng \
+           --outdir ./data/results \
            --rounds 6 \
            --workers 4
 
@@ -37,8 +37,9 @@ from tqdm import tqdm
 from feature_extractor import extract_flows, FEATURE_COLS
 
 # ── Defaults ──────────────────────────────────────────────────
-DEFAULT_SHARDS     = sorted(glob.glob("/data/pcaps/*.pcapng"))
-DEFAULT_OUTDIR     = "/data/results"
+BASE_DIR           = Path(__file__).resolve().parent
+DEFAULT_SHARDS     = sorted(glob.glob(str(BASE_DIR / "data" / "pcaps" / "*.pcapng")))
+DEFAULT_OUTDIR     = str(BASE_DIR / "data" / "results")
 DEFAULT_OUTFILE    = "final_results.pkl"
 N_ESTIMATORS       = 200
 CONTAMINATION      = 0.05

@@ -12,8 +12,9 @@ import psutil
 import streamlit as st
 
 
-PCAP_DIR = Path(os.environ.get("PCAP_DIR", "/data/pcaps"))
-RESULTS_DIR = Path(os.environ.get("RESULTS_DIR", "/data/results"))
+BASE_DIR = Path(__file__).resolve().parent
+PCAP_DIR = Path(os.environ.get("PCAP_DIR", str(BASE_DIR / "data" / "pcaps")))
+RESULTS_DIR = Path(os.environ.get("RESULTS_DIR", str(BASE_DIR / "data" / "results")))
 
 PCAP_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)

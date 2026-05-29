@@ -4,7 +4,7 @@ Treino rápido de Autoencoder (dense) sobre o cache de features.
 Gera um pickle com tempos de treino e inferência e scores (erro de reconstrução).
 
 Uso:
-    python ae_train.py --cache-file /data/results/features_cache.pkl --outdir /data/results --outfile ae_results.pkl
+    python ae_train.py --cache-file ./data/results/features_cache.pkl --outdir ./data/results --outfile ae_results.pkl
 
 Dependências: torch, numpy
 """
@@ -75,7 +75,7 @@ def train_ae(X: np.ndarray, device: str = "cpu", epochs=20, batch_size=1024, lr=
 def main():
     parser = argparse.ArgumentParser(description="Autoencoder benchmark sobre cache de features")
     parser.add_argument("--cache-file", required=True)
-    parser.add_argument("--outdir", default="/data/results")
+    parser.add_argument("--outdir", default=str(Path(__file__).resolve().parent / "data" / "results"))
     parser.add_argument("--outfile", default="ae_results.pkl")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=1024)

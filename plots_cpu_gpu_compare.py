@@ -3,7 +3,7 @@ plots_cpu_gpu_compare.py
 Gera gráficos de comparação CPU federado vs GPU benchmark.
 
 Foco: Tempo de CLASSIFICAÇÃO (train + infer), não incluindo extração de features.
-      Se arquivos foram gerados com --cache-file, isolam completamente classificação.
+    Se arquivos foram gerados com --cache-file, isolam completamente classificação.
 """
 
 import argparse
@@ -25,7 +25,7 @@ def main():
     )
     parser.add_argument("--cpu-results", required=True, help="Saída de federated_train.py")
     parser.add_argument("--gpu-results", required=True, help="Saída de gpu_train.py")
-    parser.add_argument("--outdir", default="/data/results")
+    parser.add_argument("--outdir", default=str(Path(__file__).resolve().parent / "data" / "results"))
     parser.add_argument("--basename", default="cpu_gpu_comparison")
     args = parser.parse_args()
 

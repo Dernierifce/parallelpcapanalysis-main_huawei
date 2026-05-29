@@ -5,8 +5,8 @@ Executado UMA VEZ antes dos benchmarks de classificação.
 
 Uso:
     python preprocess_features.py \
-        --shards /data/pcaps/*.pcapng \
-        --outdir /data/results \
+        --shards ./data/pcaps/*.pcapng \
+        --outdir ./data/results \
         --cache-file features_cache.pkl
 
 Benefício:
@@ -26,8 +26,9 @@ from sklearn.preprocessing import StandardScaler
 
 from feature_extractor import FEATURE_COLS, extract_flows
 
-DEFAULT_SHARDS = sorted(glob.glob("/data/pcaps/*.pcapng"))
-DEFAULT_OUTDIR = "/data/results"
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_SHARDS = sorted(glob.glob(str(BASE_DIR / "data" / "pcaps" / "*.pcapng")))
+DEFAULT_OUTDIR = str(BASE_DIR / "data" / "results")
 DEFAULT_CACHE_FILE = "features_cache.pkl"
 
 
