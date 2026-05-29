@@ -34,11 +34,13 @@ Instale as dependências principais com:
 pip install -r requirements.txt
 ```
 
-Se for usar a versão com GPU/cuML, instale também:
+Se for usar a versão com GPU, instale também:
 
 ```bash
 pip install -r requirements-gpu.txt
 ```
+
+Observação: neste ambiente, `requirements-gpu.txt` instala apenas os pacotes de GPU com wheel compatível. O treino em `gpu_train.py` faz fallback automático para CPU quando `cuML` não estiver disponível.
 
 Para Autoencoder, instale PyTorch conforme seu ambiente e versão de CUDA.
 
@@ -49,21 +51,21 @@ Para Autoencoder, instale PyTorch conforme seu ambiente e versão de CUDA.
 1. Gerar o cache de features:
 
 ```bash
-python preprocess_features.py --shards /data/pcaps/*.pcapng --outdir /data/results --cache-file features_cache.pkl
+python preprocess_features.py --shards ./data/pcaps/*.pcapng --outdir ./data/results --cache-file features_cache.pkl
 ```
 
 1. Executar os benchmarks usando o cache:
 
 ```bash
-python gpu_train.py --cache-file /data/results/features_cache.pkl --outdir /data/results --outfile gpu_results.pkl
-python federated_train.py --cache-file /data/results/features_cache.pkl --outdir /data/results --outfile cpu_federated_results.pkl --rounds 6 --workers 4
-python ae_train.py --cache-file /data/results/features_cache.pkl --outdir /data/results --outfile ae_results.pkl --epochs 20
+python gpu_train.py --cache-file ./data/results/features_cache.pkl --outdir ./data/results --outfile gpu_results.pkl
+python federated_train.py --cache-file ./data/results/features_cache.pkl --outdir ./data/results --outfile cpu_federated_results.pkl --rounds 6 --workers 4
+python ae_train.py --cache-file ./data/results/features_cache.pkl --outdir ./data/results --outfile ae_results.pkl --epochs 20
 ```
 
 1. Gerar os gráficos comparativos:
 
 ```bash
-python plots_cpu_gpu_compare.py --cpu-results /data/results/cpu_federated_results.pkl --gpu-results /data/results/gpu_results.pkl --outdir /data/results --basename cpu_gpu_comparison
+python plots_cpu_gpu_compare.py --cpu-results ./data/results/cpu_federated_results.pkl --gpu-results ./data/results/gpu_results.pkl --outdir ./data/results --basename cpu_gpu_comparison
 ```
 
 ## Dashboard
