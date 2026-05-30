@@ -1,24 +1,12 @@
 """
 federated_train.py
-Pipeline federado não supervisionado com IsolationForest + FedAvg.
+Treinamento federado com Isolation Forest em CPU.
 
-Modos:
-    1. Com CACHE (recomendado para focar em classificação):
-       python federated_train.py \
-           --cache-file ./data/results/features_cache.pkl \
-           --outdir ./data/results \
-           --rounds 6 \
-           --workers 4 \
-           --outfile cpu_federated_results.pkl
-    
-    2. Sem cache (modo legado — inclui extração):
-       python federated_train.py \
-           --shards ./data/pcaps/*.pcapng \
-           --outdir ./data/results \
-           --rounds 6 \
-           --workers 4
+Uso recomendado:
+    python federated_train.py --cache-file ./data/results/features_cache.pkl --outdir ./data/results --outfile cpu_federated_results.pkl
 
-Nota: modo com --cache-file isola medição APENAS de classificação (train + infer)
+Modo legado:
+    python federated_train.py --shards ./data/pcaps/*.pcapng --outdir ./data/results --outfile cpu_federated_results.pkl
 """
 
 import argparse
@@ -29,248 +17,183 @@ from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from tqdm import tqdm
 
-from feature_extractor import extract_flows, FEATURE_COLS
-
-# ── Defaults ──────────────────────────────────────────────────
-BASE_DIR           = Path(__file__).resolve().parent
-DEFAULT_SHARDS     = sorted(glob.glob(str(BASE_DIR / "data" / "pcaps" / "*.pcapng")))
-DEFAULT_OUTDIR     = str(BASE_DIR / "data" / "results")
-DEFAULT_OUTFILE    = "final_results.pkl"
-N_ESTIMATORS       = 200
-CONTAMINATION      = 0.05
-N_FL_ROUNDS        = 6
-N_WORKERS          = 4
+from feature_extractor import FEATURE_COLS, extract_flows
 
 
-# ══════════════════════════════════════════════════════════════
-# Worker: extrai features e treina modelo local
-# ══════════════════════════════════════════════════════════════
-def worker_train(args: tuple) -> dict:
-    """
-    Executado em processo separado (multiprocessing.Pool).
-    
-    Args:
-        args: tuple (worker_id, features_data, global_params, fl_round, 
-                     n_estimators, contamination, use_cache)
-              - Se use_cache: features_data é um dicionário com X_scaled
-              - Se não: features_data é shard_path string
-    
-    Retorna: dict com métricas incluindo classification_time (sem extração)
-    """
-    if len(args) == 8:
-        worker_id, features_data, global_params, fl_round, n_estimators, contamination, use_cache, shard_path = args
-    else:
-        # Compatibilidade com modo legado
-        worker_id, shard_path, global_params, fl_round, n_estimators, contamination = args
-        use_cache = False
-        features_data = None
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_SHARDS = sorted(glob.glob(str(BASE_DIR / "data" / "pcaps" / "*.pcapng")))
+DEFAULT_OUTDIR = str(BASE_DIR / "data" / "results")
+DEFAULT_OUTFILE = "cpu_federated_results.pkl"
+DEFAULT_ROUNDS = 6
+DEFAULT_WORKERS = 4
+DEFAULT_ESTIMATORS = 200
+DEFAULT_CONTAMINATION = 0.05
 
-    classification_start = time.perf_counter()
 
-    # ── Carregar features: do cache OU extrair ────────────────────────
-    if use_cache and features_data:
-        # Modo cache: não medir extração
-        X_sc = features_data["X_scaled"]
-        df_n_flows = features_data["n_flows"]
-        extraction_time = 0.0
-    else:
-        # Modo legado: extrair (inclui no tempo total)
-        t_extract_start = time.perf_counter()
-        df = extract_flows(shard_path, anonymize=True)
-        X = df[FEATURE_COLS].fillna(0).values
-        df_n_flows = len(df)
-        extraction_time = time.perf_counter() - t_extract_start
+def _load_features(cache_file: str | None, shards: list[str]) -> tuple[list[np.ndarray], float, list[dict], str]:
+    if cache_file:
+        with open(cache_file, "rb") as f:
+            cache = pickle.load(f)
 
-        scaler = StandardScaler()
-        X_sc = scaler.fit_transform(X)
+        X_scaled = cache["X_scaled"]
+        shard_stats = cache.get("shard_stats", [])
+        if not shard_stats:
+            shard_stats = [{"shard_path": f"cache_{i}", "n_flows": int(len(X_scaled))} for i in range(1)]
 
-    # ── Treino local ──────────────────────────────────────────
-    t_train_start = time.perf_counter()
+        counts = [int(s.get("n_flows", 0)) for s in shard_stats]
+        if not counts or sum(counts) <= 0:
+            counts = [len(X_scaled)]
+
+        split_indices = [0]
+        for count in counts:
+            split_indices.append(split_indices[-1] + count)
+        split_indices[-1] = min(split_indices[-1], len(X_scaled))
+
+        worker_data = []
+        for start, end in zip(split_indices[:-1], split_indices[1:]):
+            if start >= len(X_scaled):
+                continue
+            worker_data.append(X_scaled[start:end])
+        if not worker_data:
+            worker_data = [X_scaled]
+        return worker_data, 0.0, shard_stats, "cache"
+
+    extraction_start = time.perf_counter()
+    all_dfs = []
+    shard_stats = []
+
+    for shard in sorted(shards):
+        t0 = time.perf_counter()
+        df = extract_flows(shard, anonymize=True)
+        elapsed = time.perf_counter() - t0
+        all_dfs.append(df)
+        shard_stats.append({"shard_path": str(shard), "n_flows": int(len(df)), "extract_s": elapsed})
+        print(f"  [EXTRACT] {Path(shard).name:30s} | flows={len(df):,} | t={elapsed:.1f}s")
+
+    if not all_dfs:
+        raise ValueError("Nenhum shard informado/encontrado. Verifique --shards.")
+
+    merged = np.vstack([df[FEATURE_COLS].fillna(0).values for df in all_dfs])
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(merged)
+
+    n_workers = max(1, min(len(shards), cpu_count()))
+    worker_data = np.array_split(X_scaled, n_workers)
+    worker_data = [chunk for chunk in worker_data if len(chunk) > 0]
+    return worker_data, time.perf_counter() - extraction_start, shard_stats, "full"
+
+
+def _train_worker(payload: tuple) -> dict:
+    worker_id, X_worker, global_params, fl_round, n_estimators, contamination = payload
+
     model = IsolationForest(
         n_estimators=n_estimators,
         contamination=contamination,
         random_state=worker_id + fl_round * 100,
-        warm_start=(fl_round > 0 and global_params is not None),
-        n_jobs=1,   # cada worker usa 1 thread (paralelismo já é pelo Pool)
+        warm_start=False,
+        n_jobs=1,
     )
 
-    if fl_round > 0 and global_params is not None:
+    if global_params is not None:
+        model.set_params(warm_start=True)
         model.estimators_ = list(global_params["estimators"])
         model.estimators_features_ = list(global_params["features"])
         model.n_features_in_ = global_params["n_features"]
         model.max_samples_ = global_params.get("max_samples", 256)
 
-    model.fit(X_sc)
-    t_train = time.perf_counter() - t_train_start
+    t_train_start = time.perf_counter()
+    model.fit(X_worker)
+    train_time = time.perf_counter() - t_train_start
 
-    # ── Inferência ────────────────────────────────────────────
     t_infer_start = time.perf_counter()
-    scores = model.decision_function(X_sc)
-    labels = model.predict(X_sc)  # -1 = anomalia, 1 = normal
-    t_infer = time.perf_counter() - t_infer_start
+    scores = model.decision_function(X_worker)
+    labels = model.predict(X_worker)
+    infer_time = time.perf_counter() - t_infer_start
+    classification_time = train_time + infer_time
 
     n_anom = int((labels == -1).sum())
-    classification_time = t_train + t_infer
-    total_elapsed = extraction_time + classification_time
 
     print(
-        f"  [W{worker_id}] R{fl_round + 1} | "
-        f"fluxos={df_n_flows:,} | anomalias={n_anom:,} "
-        f"({n_anom / df_n_flows * 100:.2f}%) | "
-        f"class={classification_time:.2f}s"
+        f"  [W{worker_id}] R{fl_round + 1} | fluxos={len(X_worker):,} | anomalias={n_anom:,} "
+        f"({n_anom / max(len(X_worker), 1) * 100:.2f}%) | class={classification_time:.2f}s"
     )
 
     return {
         "worker_id": worker_id,
         "fl_round": fl_round,
-        "shard_path": str(shard_path),
-        "n_flows": df_n_flows,
+        "n_flows": int(len(X_worker)),
         "n_anomalies": n_anom,
-        "anom_rate": n_anom / df_n_flows,
+        "anom_rate": float(n_anom / max(len(X_worker), 1)),
         "times": {
-            "extract_s": extraction_time,
-            "train_s": t_train,
-            "infer_s": t_infer,
+            "train_s": train_time,
+            "infer_s": infer_time,
             "classification_s": classification_time,
-            "total_s": total_elapsed,
         },
         "scores": scores,
         "labels": labels,
-        "X_scaled": X_sc,
         "local_params": {
             "estimators": model.estimators_,
             "features": model.estimators_features_,
             "n_features": model.n_features_in_,
             "max_samples": getattr(model, "max_samples_", 256),
-            "n_flows": df_n_flows,
+            "n_flows": int(len(X_worker)),
         },
     }
 
 
-# ══════════════════════════════════════════════════════════════
-# Agregador FedAvg
-# ══════════════════════════════════════════════════════════════
-def fedavg_aggregate(worker_results: list, n_estimators: int) -> dict:
-    """
-    FedAvg para IsolationForest: seleciona subconjunto de árvores
-    de cada worker ponderado proporcionalmente ao nº de fluxos.
-    Simula troca de parâmetros sem transferir dados brutos.
-    """
+def _aggregate(worker_results: list[dict], n_estimators: int) -> dict:
     total_flows = sum(r["local_params"]["n_flows"] for r in worker_results)
-    weights     = [r["local_params"]["n_flows"] / total_flows
-                   for r in worker_results]
+    if total_flows <= 0:
+        total_flows = len(worker_results)
 
-    all_estimators:    list = []
-    all_feat_subsets:  list = []
+    all_estimators = []
+    all_features = []
 
-    for r, w in zip(worker_results, weights):
-        n_trees = max(1, round(w * n_estimators))
-        local_est  = r["local_params"]["estimators"]
-        local_feat = r["local_params"]["features"]
-        idx = np.random.choice(len(local_est), min(n_trees, len(local_est)),
-                               replace=False)
-        all_estimators   += [local_est[i]  for i in idx]
-        all_feat_subsets += [local_feat[i] for i in idx]
+    for result in worker_results:
+        n_local = max(1, round((result["local_params"]["n_flows"] / total_flows) * n_estimators))
+        local_estimators = result["local_params"]["estimators"]
+        local_features = result["local_params"]["features"]
+        take = min(n_local, len(local_estimators))
+        chosen = np.random.choice(len(local_estimators), take, replace=False)
+        all_estimators.extend(local_estimators[index] for index in chosen)
+        all_features.extend(local_features[index] for index in chosen)
 
     return {
-        "estimators":  all_estimators,
-        "features":    all_feat_subsets,
-        "n_features":  worker_results[0]["local_params"]["n_features"],
+        "estimators": all_estimators,
+        "features": all_features,
+        "n_features": worker_results[0]["local_params"]["n_features"],
         "max_samples": worker_results[0]["local_params"]["max_samples"],
     }
 
 
-# ══════════════════════════════════════════════════════════════
-# Loop principal
-# ══════════════════════════════════════════════════════════════
 def main():
-    parser = argparse.ArgumentParser(
-        description="Treinamento federado não supervisionado — PAD/IFCE"
-    )
-    parser.add_argument(
-        "--shards", nargs="+", default=DEFAULT_SHARDS, help="Arquivos pcapng dos shards"
-    )
-    parser.add_argument(
-        "--cache-file",
-        default=None,
-        help="Arquivo .pkl com features pré-extraídas (modo recomendado)",
-    )
+    parser = argparse.ArgumentParser(description="Treinamento federado com Isolation Forest")
+    parser.add_argument("--shards", nargs="+", default=DEFAULT_SHARDS)
+    parser.add_argument("--cache-file", default=None, help="Cache gerado por preprocess_features.py")
     parser.add_argument("--outdir", default=DEFAULT_OUTDIR)
-    parser.add_argument("--rounds", type=int, default=N_FL_ROUNDS)
-    parser.add_argument(
-        "--workers", type=int, default=min(N_WORKERS, cpu_count())
-    )
-    parser.add_argument("--estimators", type=int, default=N_ESTIMATORS)
-    parser.add_argument("--contamination", type=float, default=CONTAMINATION)
-    parser.add_argument("--outfile", default=DEFAULT_OUTFILE, help="Nome do arquivo .pkl de saída")
+    parser.add_argument("--outfile", default=DEFAULT_OUTFILE)
+    parser.add_argument("--rounds", type=int, default=DEFAULT_ROUNDS)
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
+    parser.add_argument("--estimators", type=int, default=DEFAULT_ESTIMATORS)
+    parser.add_argument("--contamination", type=float, default=DEFAULT_CONTAMINATION)
     args = parser.parse_args()
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
 
-    # ── CARREGAR FEATURES: Do cache OU preparar shards ──────────────────
-    if args.cache_file:
-        print("=" * 70)
-        print("  PAD — Treinamento Federado (Modo CACHE)")
-        print(f"  Carregando cache: {args.cache_file}")
-        print(f"  Workers: {args.workers}")
-        print(f"  Rounds: {args.rounds}")
-        print(f"  N trees: {args.estimators}")
-        print("=" * 70)
+    print("=" * 70)
+    print("  PAD — Treinamento Federado (Isolation Forest)")
+    print(f"  Mode: {'CACHE' if args.cache_file else 'FULL'}")
+    print(f"  Workers: {args.workers}")
+    print(f"  Rounds: {args.rounds}")
+    print(f"  N trees: {args.estimators}")
+    print("=" * 70)
 
-        with open(args.cache_file, "rb") as f:
-            cache = pickle.load(f)
-
-        X_scaled = cache["X_scaled"]
-        shard_stats = cache.get("shard_stats", [])
-        total_flows_cache = cache["n_flows"]
-        use_cache = True
-        mode = "cache"
-
-        # Distribuir features entre workers proporcionalmente
-        n_flows_per_shard = [s["n_flows"] for s in shard_stats]
-        n_workers = min(args.workers, len(shard_stats))
-
-        # Dividir X_scaled entre workers
-        split_indices = [0]
-        for n in n_flows_per_shard:
-            split_indices.append(split_indices[-1] + n)
-
-        cache_per_worker = []
-        for i in range(n_workers):
-            shard_idx = i % len(shard_stats)
-            start_idx = split_indices[shard_idx]
-            end_idx = split_indices[shard_idx + 1]
-            cache_per_worker.append(
-                {
-                    "X_scaled": X_scaled[start_idx:end_idx],
-                    "n_flows": end_idx - start_idx,
-                }
-            )
-
-        shards_or_cache = cache_per_worker
-    else:
-        print("=" * 70)
-        print("  PAD — Treinamento Federado (Modo COMPLETO com extração)")
-        print(f"  Shards: {len(args.shards)}")
-        print(f"  Workers: {args.workers}")
-        print(f"  Rounds: {args.rounds}")
-        print(f"  N trees: {args.estimators}")
-        print("=" * 70)
-
-        shards = sorted(args.shards)
-        if not shards:
-            raise ValueError("Nenhum shard informado/encontrado. Verifique --shards.")
-        use_cache = False
-        mode = "full"
-        shard_stats = [{"shard_path": str(s), "n_flows": 0} for s in shards]
-        shards_or_cache = shards
-
-    print(f"  Modo: {mode.upper()}\n")
+    worker_data, extraction_time, shard_stats, mode = _load_features(args.cache_file, args.shards)
+    n_workers = max(1, min(args.workers, len(worker_data)))
+    worker_data = worker_data[:n_workers]
 
     global_params = None
     history = []
@@ -281,48 +204,22 @@ def main():
         print(f"  Round FL {fl_round + 1}/{args.rounds}")
         print(f"{'─' * 50}")
 
-        # ── Preparar argumentos para workers ──────────────────────────
-        if use_cache:
-            n_workers_actual = min(args.workers, len(shards_or_cache))
-            task_args = [
-                (
-                    i,
-                    shards_or_cache[i],
-                    global_params,
-                    fl_round,
-                    args.estimators,
-                    args.contamination,
-                    use_cache,
-                    f"cache_{i}",
-                )
-                for i in range(n_workers_actual)
-            ]
-        else:
-            shards = shards_or_cache
-            task_args = [
-                (i, shards[i], global_params, fl_round, args.estimators, args.contamination)
-                for i in range(len(shards))
-            ]
+        task_args = [
+            (worker_id, worker_data[worker_id], global_params, fl_round, args.estimators, args.contamination)
+            for worker_id in range(len(worker_data))
+        ]
 
         t_round_start = time.perf_counter()
-        with Pool(processes=args.workers) as pool:
-            results = pool.map(worker_train, task_args)
+        with Pool(processes=n_workers) as pool:
+            results = pool.map(_train_worker, task_args)
         t_round = time.perf_counter() - t_round_start
 
-        # FedAvg
-        global_params = fedavg_aggregate(results, args.estimators)
+        global_params = _aggregate(results, args.estimators)
 
-        # Métricas consolidadas
         total_flows = sum(r["n_flows"] for r in results)
         total_anom = sum(r["n_anomalies"] for r in results)
-
-        # Tempos: usar classification_time se em modo cache
-        if use_cache:
-            worker_times = [r["times"]["classification_s"] for r in results]
-        else:
-            worker_times = [r["times"]["total_s"] for r in results]
-
-        t_serial_eq = sum(worker_times) * 1.08  # overhead estimado
+        worker_times = [r["times"]["classification_s"] for r in results]
+        t_serial_eq = sum(worker_times) * 1.08
 
         round_info = {
             "round": fl_round + 1,
@@ -332,47 +229,54 @@ def main():
             "round_time_s": t_round,
             "serial_eq_s": t_serial_eq,
             "speedup": t_serial_eq / t_round if t_round > 0 else 0,
-            "efficiency": (t_serial_eq / t_round / args.workers) if t_round > 0 else 0,
+            "efficiency": (t_serial_eq / t_round / n_workers) if t_round > 0 else 0,
             "worker_times": worker_times,
-            "imbalance_pct": (
-                (max(worker_times) - min(worker_times)) / np.mean(worker_times) * 100
-                if worker_times
-                else 0
-            ),
-            "mode": mode,
         }
         history.append(round_info)
 
-        print(f"\n  Fluxos totais : {total_flows:,}")
-        print(f"  Anomalias     : {total_anom:,}  ({total_anom / total_flows * 100:.2f}%)")
-        print(f"  Tempo paralelo: {t_round:.1f}s")
-        print(f"  Speedup S(N)  : {round_info['speedup']:.2f}×")
-        print(f"  Eficiência    : {round_info['efficiency'] * 100:.1f}%")
-        print(f"  Desbalance    : {round_info['imbalance_pct']:.1f}%")
-
-    t_total = time.perf_counter() - t_total_start
-
-    # Salva resultados
-    out_file = Path(args.outdir) / args.outfile
-    with open(out_file, "wb") as f:
-        pickle.dump(
-            {
-                "mode": mode,
-                "history": history,
-                "final_round": results,
-                "args": vars(args),
-                "total_time_s": t_total,
-            },
-            f,
+        print(
+            f"  [Round {fl_round + 1}] flows={total_flows:,} | anomalias={total_anom:,} "
+            f"({round_info['anom_rate'] * 100:.2f}%) | round={t_round:.2f}s | serial_eq={t_serial_eq:.2f}s"
         )
 
+    total_time = time.perf_counter() - t_total_start
+
+    final_round = history[-1] if history else {}
+    out = {
+        "method": "isolation_forest_federated",
+        "backend": "cpu-sklearn-federated",
+        "mode": mode,
+        "args": vars(args),
+        "n_rounds": args.rounds,
+        "n_workers": n_workers,
+        "n_flows": int(final_round.get("total_flows", 0)),
+        "n_anomalies": int(final_round.get("total_anom", 0)),
+        "anom_rate": float(final_round.get("anom_rate", 0.0)),
+        "times": {
+            "extract_s": extraction_time,
+            "total_s": total_time,
+            "classification_s": float(sum(r.get("serial_eq_s", 0.0) for r in history)),
+        },
+        "history": history,
+        "shards": shard_stats,
+    }
+
+    out_path = Path(args.outdir) / args.outfile
+    with open(out_path, "wb") as f:
+        pickle.dump(out, f)
+
     print("\n" + "=" * 70)
-    print(f"  Treinamento concluído em {t_total:.1f}s")
-    print(f"  Modo: {mode.upper()}")
-    if mode == "cache":
-        print(f"  ► Métrica final (classificação): "
-              f"{sum(h['serial_eq_s'] for h in history):.1f}s")
-    print(f"  Resultados salvos em: {out_file}")
+    print(f"  Method: {out['method']}")
+    print(f"  Backend: {out['backend']}")
+    print(f"  Mode: {mode.upper()}")
+    print(f"  Rounds: {args.rounds}")
+    print(f"  Workers: {n_workers}")
+    print(f"  Fluxos: {out['n_flows']:,}")
+    print(f"  Anomalias: {out['n_anomalies']:,} ({out['anom_rate'] * 100:.2f}%)")
+    print(f"  Extração: {extraction_time:.1f}s")
+    print(f"  Classificação (serial eq): {out['times']['classification_s']:.1f}s")
+    print(f"  Tempo total: {total_time:.1f}s")
+    print(f"  Resultado: {out_path}")
     print("=" * 70)
 
 

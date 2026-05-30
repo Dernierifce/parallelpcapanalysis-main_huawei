@@ -1,3 +1,1 @@
-# GPU support for environments that have CUDA available.
-# cuML is optional because it is not available for every OS/Python combination.
-cupy-cuda12x
+torch

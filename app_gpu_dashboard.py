@@ -193,11 +193,11 @@ def collect_gpu_info():
     }
 
 
-st.title("PAD Dashboard: Upload, Treino CPU, Benchmark GPU")
+st.title("PAD Dashboard: Upload, Treino CPU e Autoencoder GPU")
 st.caption(f"Snapshot: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 st.caption(f"PCAP volume: {PCAP_DIR} | Resultados: {RESULTS_DIR}")
 st.info(
-    "A interface completa tem 5 abas: Hardware, PCAPs, Treino CPU Federado, Benchmark GPU e Charts. "
+    "A interface completa tem 7 abas: Hardware, PCAPs, Treino CPU, Treino Federado, Autoencoder GPU, Métodos e Charts. "
     "Se preferir, use a seção abaixo para upload e execução rápida sem trocar de aba."
 )
 
@@ -223,25 +223,21 @@ with st.expander("Upload e Processamento Rápido", expanded=True):
     st.write(f"Arquivos detectados no volume: {len(quick_files)}")
 
     col_q1, col_q2, col_q3 = st.columns(3)
-    quick_cpu_out = col_q1.text_input("Saída CPU", value="cpu_federated_results.pkl", key="quick_cpu_out")
+    quick_cpu_out = col_q1.text_input("Saída CPU", value="cpu_results.pkl", key="quick_cpu_out")
     quick_gpu_out = col_q2.text_input("Saída GPU", value="gpu_results.pkl", key="quick_gpu_out")
     quick_chart_base = col_q3.text_input("Nome do chart", value="cpu_gpu_comparison", key="quick_chart_base")
 
     cqa, cqb, cqc = st.columns(3)
-    if cqa.button("Executar CPU (4 workers)", width="stretch", key="quick_run_cpu"):
+    if cqa.button("Executar CPU (Isolation Forest)", width="stretch", key="quick_run_cpu"):
         if not quick_files:
             st.error("Nenhum PCAP disponível para treino CPU.")
         else:
             args = [
-                "federated_train.py",
+                "cpu_train.py",
                 "--shards",
                 *[str(p) for p in quick_files[:4]],
                 "--outdir",
                 str(RESULTS_DIR),
-                "--rounds",
-                "6",
-                "--workers",
-                "4",
                 "--estimators",
                 "200",
                 "--contamination",
@@ -256,7 +252,7 @@ with st.expander("Upload e Processamento Rápido", expanded=True):
             else:
                 st.error(f"Falha no CPU rápido (exit code {code}).")
 
-    if cqb.button("Executar GPU", width="stretch", key="quick_run_gpu"):
+    if cqb.button("Executar GPU (Autoencoder)", width="stretch", key="quick_run_gpu"):
         if not quick_files:
             st.error("Nenhum PCAP disponível para benchmark GPU.")
         else:
@@ -268,11 +264,14 @@ with st.expander("Upload e Processamento Rápido", expanded=True):
                 str(RESULTS_DIR),
                 "--outfile",
                 quick_gpu_out,
-                "--estimators",
-                "400",
-                "--contamination",
-                "0.05",
-                "--allow-cpu-fallback",
+                "--epochs",
+                "20",
+                "--batch-size",
+                "1024",
+                "--latent-dim",
+                "16",
+                "--anom-percentile",
+                "95.0",
             ]
             with st.spinner("Executando GPU rápido..."):
                 code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
@@ -304,8 +303,8 @@ with st.expander("Upload e Processamento Rápido", expanded=True):
     if quick_png.exists():
         st.image(str(quick_png), caption=f"Preview: {quick_png}")
 
-tab_hw, tab_data, tab_cpu, tab_gpu, tab_methods, tab_charts = st.tabs(
-    ["Hardware", "PCAPs", "Treino CPU Federado", "Benchmark GPU", "Methods", "Charts"]
+tab_hw, tab_data, tab_cpu, tab_fed, tab_gpu, tab_methods, tab_charts = st.tabs(
+    ["Hardware", "PCAPs", "Treino CPU", "Treino Federado", "Autoencoder GPU", "Métodos", "Charts"]
 )
 
 with tab_hw:
@@ -386,34 +385,28 @@ with tab_data:
         st.warning("Nenhum PCAP no volume ainda.")
 
 with tab_cpu:
-    st.subheader("Treinamento federado em CPU")
+    st.subheader("Treinamento CPU com Isolation Forest")
     files = list_pcap_files()
     selected_cpu = st.multiselect(
         "Selecione os shards para CPU",
         options=[str(p) for p in files],
         default=[str(p) for p in files[:4]],
     )
-    c1, c2, c3 = st.columns(3)
-    rounds = c1.number_input("Rounds FL", min_value=1, max_value=20, value=6)
-    workers = c2.number_input("Workers CPU", min_value=1, max_value=32, value=4)
-    estimators = c3.number_input("N estimators", min_value=50, max_value=1000, value=200, step=50)
-    contamination = st.slider("Contamination", min_value=0.001, max_value=0.3, value=0.05, step=0.001)
-    cpu_outfile = st.text_input("Arquivo de saída CPU", value="cpu_federated_results.pkl")
+    c1, c2 = st.columns(2)
+    estimators = c1.number_input("N estimators", min_value=50, max_value=1000, value=200, step=50)
+    contamination = c2.slider("Contamination", min_value=0.001, max_value=0.3, value=0.05, step=0.001)
+    cpu_outfile = st.text_input("Arquivo de saída CPU", value="cpu_results.pkl")
 
-    if st.button("Rodar treino federado CPU", width="stretch"):
+    if st.button("Rodar treino CPU", width="stretch"):
         if not selected_cpu:
             st.error("Selecione ao menos um arquivo PCAP.")
         else:
             args = [
-                "federated_train.py",
+                "cpu_train.py",
                 "--shards",
                 *selected_cpu,
                 "--outdir",
                 str(RESULTS_DIR),
-                "--rounds",
-                str(rounds),
-                "--workers",
-                str(workers),
                 "--estimators",
                 str(estimators),
                 "--contamination",
@@ -421,26 +414,70 @@ with tab_cpu:
                 "--outfile",
                 cpu_outfile,
             ]
-            with st.spinner("Executando treino federado CPU..."):
+            with st.spinner("Executando treino CPU..."):
                 code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
             if code == 0:
                 st.success("Treino CPU concluído.")
             else:
                 st.error(f"Treino CPU falhou (exit code {code}).")
 
+with tab_fed:
+    st.subheader("Treinamento federado com Isolation Forest")
+    files = list_pcap_files()
+    selected_fed = st.multiselect(
+        "Selecione os shards para federado",
+        options=[str(p) for p in files],
+        default=[str(p) for p in files[:4]],
+    )
+    f1, f2, f3 = st.columns(3)
+    fed_rounds = f1.number_input("Rounds", min_value=1, max_value=20, value=6, step=1)
+    fed_workers = f2.number_input("Workers", min_value=1, max_value=32, value=4, step=1)
+    fed_estimators = f3.number_input("N trees", min_value=50, max_value=1000, value=200, step=50)
+    fed_contamination = st.slider("Contamination", min_value=0.001, max_value=0.3, value=0.05, step=0.001)
+    fed_outfile = st.text_input("Arquivo de saída federado", value="cpu_federated_results.pkl")
+
+    if st.button("Rodar treino federado", width="stretch"):
+        if not selected_fed:
+            st.error("Selecione ao menos um arquivo PCAP.")
+        else:
+            args = [
+                "federated_train.py",
+                "--shards",
+                *selected_fed,
+                "--outdir",
+                str(RESULTS_DIR),
+                "--rounds",
+                str(fed_rounds),
+                "--workers",
+                str(fed_workers),
+                "--estimators",
+                str(fed_estimators),
+                "--contamination",
+                str(fed_contamination),
+                "--outfile",
+                fed_outfile,
+            ]
+            with st.spinner("Executando treino federado..."):
+                code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
+            if code == 0:
+                st.success("Treino federado concluído.")
+            else:
+                st.error(f"Treino federado falhou (exit code {code}).")
+
 with tab_gpu:
-    st.subheader("Benchmark de treino com GPU")
+    st.subheader("Benchmark GPU com Autoencoder")
     files = list_pcap_files()
     selected_gpu = st.multiselect(
         "Selecione os shards para GPU",
         options=[str(p) for p in files],
         default=[str(p) for p in files[:4]],
     )
-    g1, g2 = st.columns(2)
-    gpu_estimators = g1.number_input("N estimators (GPU)", min_value=50, max_value=2000, value=400, step=50)
-    gpu_cont = g2.slider("Contamination (GPU)", min_value=0.001, max_value=0.3, value=0.05, step=0.001)
+    g1, g2, g3 = st.columns(3)
+    gpu_epochs = g1.number_input("Épocas", min_value=1, max_value=200, value=20, step=1)
+    gpu_batch = g2.number_input("Batch size", min_value=32, max_value=8192, value=1024, step=32)
+    gpu_latent = g3.number_input("Latent dim", min_value=2, max_value=256, value=16, step=2)
+    gpu_percentile = st.slider("Percentil de anomalia", min_value=50.0, max_value=99.9, value=95.0, step=0.1)
     gpu_outfile = st.text_input("Arquivo de saída GPU", value="gpu_results.pkl")
-    cpu_fallback = st.checkbox("Permitir fallback para CPU se cuML falhar", value=True)
 
     if st.button("Rodar benchmark GPU", width="stretch"):
         if not selected_gpu:
@@ -454,14 +491,15 @@ with tab_gpu:
                 str(RESULTS_DIR),
                 "--outfile",
                 gpu_outfile,
-                "--estimators",
-                str(gpu_estimators),
-                "--contamination",
-                str(gpu_cont),
+                "--epochs",
+                str(gpu_epochs),
+                "--batch-size",
+                str(gpu_batch),
+                "--latent-dim",
+                str(gpu_latent),
+                "--anom-percentile",
+                str(gpu_percentile),
             ]
-            if cpu_fallback:
-                args.append("--allow-cpu-fallback")
-
             with st.spinner("Executando benchmark GPU..."):
                 code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
             if code == 0:
@@ -501,8 +539,8 @@ with tab_methods:
     st.write("Escolha métodos para executar sobre o cache (após gerar cache)")
     methods = st.multiselect(
         "Métodos",
-        options=["IsolationForest (GPU)", "IsolationForest (CPU federated)", "Autoencoder (PyTorch)"],
-        default=["IsolationForest (GPU)"],
+        options=["IsolationForest (CPU)", "IsolationForest Federado", "Autoencoder (GPU)"],
+        default=["IsolationForest (CPU)", "IsolationForest Federado", "Autoencoder (GPU)"],
     )
     out_base = st.text_input("Prefixo de saída para resultados", value="run_")
     run_btn = st.button("Executar métodos selecionados", width="stretch")
@@ -514,10 +552,10 @@ with tab_methods:
             results_files = []
             for m in methods:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                if m == "IsolationForest (GPU)":
-                    outname = f"{out_base}if_gpu_{timestamp}.pkl"
+                if m == "IsolationForest (CPU)":
+                    outname = f"{out_base}if_cpu_{timestamp}.pkl"
                     args = [
-                        "gpu_train.py",
+                        "cpu_train.py",
                         "--cache-file",
                         str(cache_path),
                         "--outdir",
@@ -525,18 +563,20 @@ with tab_methods:
                         "--outfile",
                         outname,
                         "--estimators",
-                        "400",
+                        "200",
                         "--contamination",
                         "0.05",
                     ]
-                elif m == "IsolationForest (CPU federated)":
-                    outname = f"{out_base}if_cpu_fed_{timestamp}.pkl"
+                elif m == "IsolationForest Federado":
+                    outname = f"{out_base}if_fed_{timestamp}.pkl"
                     args = [
                         "federated_train.py",
                         "--cache-file",
                         str(cache_path),
                         "--outdir",
                         str(RESULTS_DIR),
+                        "--outfile",
+                        outname,
                         "--rounds",
                         "6",
                         "--workers",
@@ -545,13 +585,11 @@ with tab_methods:
                         "200",
                         "--contamination",
                         "0.05",
-                        "--outfile",
-                        outname,
                     ]
-                elif m == "Autoencoder (PyTorch)":
-                    outname = f"{out_base}ae_{timestamp}.pkl"
+                elif m == "Autoencoder (GPU)":
+                    outname = f"{out_base}ae_gpu_{timestamp}.pkl"
                     args = [
-                        "ae_train.py",
+                        "gpu_train.py",
                         "--cache-file",
                         str(cache_path),
                         "--outdir",
@@ -560,6 +598,12 @@ with tab_methods:
                         outname,
                         "--epochs",
                         "20",
+                        "--batch-size",
+                        "1024",
+                        "--latent-dim",
+                        "16",
+                        "--anom-percentile",
+                        "95.0",
                     ]
                 else:
                     continue
@@ -580,7 +624,7 @@ with tab_methods:
 
 with tab_charts:
     st.subheader("Geração de charts de comparação")
-    cpu_file = st.text_input("Resultado CPU (.pkl)", value=str(RESULTS_DIR / "cpu_federated_results.pkl"))
+    cpu_file = st.text_input("Resultado CPU (.pkl)", value=str(RESULTS_DIR / "cpu_results.pkl"))
     gpu_file = st.text_input("Resultado GPU (.pkl)", value=str(RESULTS_DIR / "gpu_results.pkl"))
     base_name = st.text_input("Nome base do chart", value="cpu_gpu_comparison")
 
