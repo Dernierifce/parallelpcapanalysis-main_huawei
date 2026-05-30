@@ -3,10 +3,10 @@ param(
     [string]$TargetPath = "C:\Users\dernier.bruno\parallelpcapanalysis-main_huawei",
     [switch]$UseGitPull,
     [switch]$Watch,
-    [string]$RemoteHost,
-    [string]$RemoteUser,
+    [string]$RemoteHost = "172.16.3.103",
+    [string]$RemoteUser = "LABHUAWEI\dernier.bruno",
     [int]$RemotePort = 22,
-    [string]$RemotePath = "/opt/parallelpcapanalysis-main_huawei",
+    [string]$RemotePath = "C:\Users\dernier.bruno\parallelpcapanalysis-main_huawei",
     [string]$SshKeyPath
 )
 
@@ -51,7 +51,7 @@ function Join-RemotePath {
         [string]$RelativePath
     )
 
-    $normalizedBase = $BasePath.TrimEnd('/')
+    $normalizedBase = $BasePath.TrimEnd('\', '/')
     $normalizedRelative = $RelativePath -replace '\\', '/'
     return "$normalizedBase/$normalizedRelative"
 }
@@ -66,6 +66,24 @@ function Get-RemoteParentPath {
     }
 
     return $normalized.Substring(0, $lastSlash)
+}
+
+function Convert-ToScpRemotePath {
+    param([string]$Path)
+
+    if ($Path -match '^[A-Za-z]:\\') {
+        $drive = $Path.Substring(0, 1)
+        $rest = $Path.Substring(2) -replace '\\', '/'
+        return "/$drive:$rest"
+    }
+
+    return ($Path -replace '\\', '/')
+}
+
+function Convert-ToRemoteShellPath {
+    param([string]$Path)
+
+    return ($Path -replace '/', '\\')
 }
 
 function Assert-CommandAvailable {
@@ -111,7 +129,8 @@ function Invoke-RemoteCopy {
         $scpArgs += @("-P", $RemotePort)
     }
 
-    & scp @scpArgs $SourceFile "$((Get-RemoteTarget)):$DestinationFile"
+    $remoteDestination = Convert-ToScpRemotePath -Path $DestinationFile
+    & scp @scpArgs $SourceFile "$((Get-RemoteTarget)):$remoteDestination"
     if ($LASTEXITCODE -ne 0) {
         throw "Falha ao copiar $SourceFile para $DestinationFile"
     }
@@ -169,9 +188,10 @@ function Sync-LocalCopy {
 function Sync-RemoteCopy {
     $remoteTarget = Get-RemoteTarget
     $normalizedRemoteRoot = $RemotePath.TrimEnd('/')
+    $remoteShellRoot = Convert-ToRemoteShellPath -Path $normalizedRemoteRoot
 
     Write-Host "Sincronizando remotamente em $remoteTarget:$normalizedRemoteRoot"
-    Invoke-RemoteCommand "mkdir -p $(Escape-RemoteShellArgument -Value $normalizedRemoteRoot)"
+    Invoke-RemoteCommand "powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path $(Escape-RemoteShellArgument -Value $remoteShellRoot) | Out-Null\""
 
     foreach ($relativeFile in $filesToSync) {
         $sourceFile = Join-Path $sourcePath $relativeFile
@@ -185,7 +205,8 @@ function Sync-RemoteCopy {
         $remoteFolder = Get-RemoteParentPath -Path $remoteFile
 
         if (-not [string]::IsNullOrWhiteSpace($remoteFolder)) {
-            Invoke-RemoteCommand "mkdir -p $(Escape-RemoteShellArgument -Value $remoteFolder)"
+            $remoteShellFolder = Convert-ToRemoteShellPath -Path $remoteFolder
+            Invoke-RemoteCommand "powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path $(Escape-RemoteShellArgument -Value $remoteShellFolder) | Out-Null\""
         }
 
         Invoke-RemoteCopy -SourceFile $sourceFile -DestinationFile $remoteFile

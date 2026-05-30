@@ -56,10 +56,10 @@ Exemplo de uso:
 
 ```powershell
 .
-\sync_local_server.ps1 -RemoteHost 192.168.1.50 -RemoteUser ubuntu -RemotePath /opt/parallelpcapanalysis-main_huawei -SshKeyPath C:\Users\voce\.ssh\id_ed25519 -Watch
+\sync_local_server.ps1 -Watch -SshKeyPath C:\Users\voce\.ssh\id_ed25519
 ```
 
-Se voce nao quiser modo continuo, remova `-Watch` para fazer apenas uma sincronizacao. O script copia os arquivos listados para o servidor remoto sempre que detecta mudancas.
+O script já vem com `172.16.3.103`, `LABHUAWEI\dernier.bruno` e `C:\Users\dernier.bruno\parallelpcapanalysis-main_huawei` como padrões. Se voce nao quiser modo continuo, remova `-Watch` para fazer apenas uma sincronizacao. O script copia os arquivos listados para o servidor remoto sempre que detecta mudancas.
 
 Requisitos:
 
