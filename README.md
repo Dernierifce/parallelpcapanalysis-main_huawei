@@ -44,6 +44,8 @@ Observação: neste ambiente, `requirements-gpu.txt` instala apenas os pacotes d
 
 Para Autoencoder, instale PyTorch conforme seu ambiente e versão de CUDA.
 
+Para extração de features, este projeto depende do TShark. No Windows, instale o Wireshark e verifique se `tshark.exe` está no PATH, ou defina `TSHARK_PATH` com o caminho completo do executável.
+
 ## Dependências
 
 ## Fluxo recomendado

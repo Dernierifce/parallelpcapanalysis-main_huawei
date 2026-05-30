@@ -7,6 +7,7 @@ Dependências:
     pip install pyshark pandas numpy
 """
 
+import os
 import pyshark
 import pandas as pd
 import numpy as np
@@ -19,6 +20,12 @@ try:
     from pyshark.capture.capture import TSharkCrashException
 except Exception:
     TSharkCrashException = Exception
+
+try:
+    from pyshark.tshark.tshark import TSharkNotFoundException, get_process_path
+except Exception:
+    TSharkNotFoundException = Exception
+    get_process_path = None
 
 # ── Features extraídas por fluxo ──────────────────────────────
 FEATURE_COLS = [
@@ -54,7 +61,32 @@ def extract_flows(pcap_path: str, anonymize: bool = True) -> pd.DataFrame:
         pd.DataFrame com FEATURE_COLS como colunas.
     """
     pcap_path = str(pcap_path)
-    cap = pyshark.FileCapture(pcap_path, keep_packets=False)
+    tshark_path = os.environ.get("TSHARK_PATH")
+
+    try:
+        resolved_tshark_path = None
+        if get_process_path is not None:
+            resolved_tshark_path = get_process_path(tshark_path)
+        cap = pyshark.FileCapture(
+            pcap_path,
+            keep_packets=False,
+            tshark_path=resolved_tshark_path,
+        )
+    except TSharkNotFoundException as exc:
+        message = (
+            "TShark não foi encontrado. Instale o Wireshark/TShark e garanta que "
+            "tshark.exe esteja no PATH ou defina a variável de ambiente TSHARK_PATH "
+            "com o caminho completo do executável."
+        )
+        raise RuntimeError(message) from exc
+    except Exception as exc:
+        message = (
+            "TShark não foi encontrado. Instale o Wireshark/TShark e "
+            "garanta que tshark.exe esteja no PATH ou defina a variável de ambiente "
+            "TSHARK_PATH com o caminho completo do executável."
+        )
+        raise RuntimeError(message) from exc
+
     flows: dict = {}
 
     try:
