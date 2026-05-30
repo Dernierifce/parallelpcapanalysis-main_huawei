@@ -26,7 +26,7 @@ def setup_run_logging(outdir: str | Path, script_name: str, log_file: str | None
     """Mirror stdout/stderr to a log file stored in the output directory."""
     output_dir = Path(outdir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    log_path = Path(log_file) if log_file else output_dir / f"{script_name}.log"
+    log_path = Path(log_file) if log_file else output_dir / "pipeline_steps.txt"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     log_handle = open(log_path, "a", encoding="utf-8")

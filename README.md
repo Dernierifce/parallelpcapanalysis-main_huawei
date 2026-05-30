@@ -46,7 +46,7 @@ Para GPU, o pacote `requirements-gpu.txt` inclui PyTorch.
 
 Para extração de features, este projeto depende do TShark. No Windows, instale o Wireshark e verifique se `tshark.exe` está no PATH, ou defina `TSHARK_PATH` com o caminho completo do executável.
 
-Cada etapa também grava um log no `outdir` por padrão: `preprocess_features.log`, `cpu_train.log`, `federated_train.log`, `gpu_train.log` e `plots_cpu_gpu_compare.log`. Se quiser nomear manualmente, use `--log-file`.
+Cada etapa também grava e reaproveita um log separado em `data/results/pipeline_steps.txt` por padrão. Se quiser outro destino, use `--log-file`.
 
 ## Fluxo recomendado
 

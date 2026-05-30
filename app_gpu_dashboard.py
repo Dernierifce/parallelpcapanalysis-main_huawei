@@ -30,7 +30,7 @@ if "app_logs" not in st.session_state:
     st.session_state["app_logs"] = ""
 log_exp = st.sidebar.expander("Logs", expanded=True)
 log_output = log_exp.empty()
-LOG_PATH = RESULTS_DIR / "logs.txt"
+LOG_PATH = RESULTS_DIR / "pipeline_steps.txt"
 
 
 def run_command(command):
