@@ -216,6 +216,15 @@ function Sync-RemoteCopy {
 
 function Sync-Project {
     if (Test-RemoteMode) {
+        if ($UseGitPull) {
+            Write-Host "Executando git pull no remoto $((Get-RemoteTarget)):$RemotePath"
+            $remoteShellPath = Convert-ToRemoteShellPath -Path $RemotePath
+            $gitCmd = "powershell -NoProfile -Command \"git -C $(Escape-RemoteShellArgument -Value $remoteShellPath) pull origin main\""
+            Invoke-RemoteCommand $gitCmd
+            Write-Host "git pull remoto concluido."
+            return
+        }
+
         Sync-RemoteCopy
         return
     }
