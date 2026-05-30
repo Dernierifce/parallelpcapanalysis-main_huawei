@@ -75,7 +75,7 @@ function Convert-ToScpRemotePath {
     if ($Path -match '^[A-Za-z]:\\') {
         $drive = $Path.Substring(0, 1)
         $rest = $Path.Substring(2) -replace '\\', '/'
-        return "/$drive:$rest"
+        return ("/" + $drive + ":" + $rest)
     }
 
     return ($Path -replace '\\', '/')
@@ -191,8 +191,10 @@ function Sync-RemoteCopy {
     $normalizedRemoteRoot = $RemotePath.TrimEnd('/')
     $remoteShellRoot = Convert-ToRemoteShellPath -Path $normalizedRemoteRoot
 
-    Write-Host "Sincronizando remotamente em $remoteTarget:$normalizedRemoteRoot"
-    Invoke-RemoteCommand "powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path $(Escape-RemoteShellArgument -Value $remoteShellRoot) | Out-Null\""
+    Write-Host ("Sincronizando remotamente em {0}:{1}" -f $remoteTarget, $normalizedRemoteRoot)
+    $mkdirCmd = "New-Item -ItemType Directory -Force -Path $($remoteShellRoot) | Out-Null"
+    $enc = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($mkdirCmd))
+    Invoke-RemoteCommand "powershell -NoProfile -EncodedCommand $enc"
 
     foreach ($relativeFile in $filesToSync) {
         $sourceFile = Join-Path $sourcePath $relativeFile
@@ -207,7 +209,9 @@ function Sync-RemoteCopy {
 
         if (-not [string]::IsNullOrWhiteSpace($remoteFolder)) {
             $remoteShellFolder = Convert-ToRemoteShellPath -Path $remoteFolder
-            Invoke-RemoteCommand "powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path $(Escape-RemoteShellArgument -Value $remoteShellFolder) | Out-Null\""
+            $mkdirCmd2 = "New-Item -ItemType Directory -Force -Path $($remoteShellFolder) | Out-Null"
+            $enc2 = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($mkdirCmd2))
+            Invoke-RemoteCommand "powershell -NoProfile -EncodedCommand $enc2"
         }
 
         Invoke-RemoteCopy -SourceFile $sourceFile -DestinationFile $remoteFile
@@ -232,13 +236,14 @@ function Sync-Project {
 
                 if ($ForceClone) {
                     Write-Host "Forcando clone remoto (removendo pasta existente, se houver)."
-                    $remoteCmd = "if (Test-Path $escapedPath) { Remove-Item -Recurse -Force $escapedPath } ; git clone $escapedOrigin $escapedPath"
+                    $remoteCmd = "if (Test-Path $($remoteShellPath)) { Remove-Item -Recurse -Force $($remoteShellPath) } ; git clone $($originUrl) $($remoteShellPath)"
                 }
                 else {
-                    $remoteCmd = "if (Test-Path ($escapedPath + '\\.git')) { git -C $escapedPath pull origin main } else { git clone $escapedOrigin $escapedPath }"
+                    $remoteCmd = "if (Test-Path ($($remoteShellPath) + '\\.git')) { git -C $($remoteShellPath) pull origin main } else { git clone $($originUrl) $($remoteShellPath) }"
                 }
 
-                $psCmd = "powershell -NoProfile -Command \"$remoteCmd\""
+                $b64 = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($remoteCmd))
+                $psCmd = "powershell -NoProfile -EncodedCommand $b64"
 
                 Invoke-RemoteCommand $psCmd
             Write-Host "Operacao git remota concluida."
