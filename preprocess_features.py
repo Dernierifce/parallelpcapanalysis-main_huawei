@@ -19,6 +19,7 @@ import argparse
 import glob
 import pickle
 import time
+import os
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +34,34 @@ DEFAULT_OUTDIR = str(BASE_DIR / "data" / "results")
 DEFAULT_CACHE_FILE = "features_cache.pkl"
 
 
+def resolve_shards(shard_args):
+    resolved = []
+    for shard in shard_args:
+        expanded = glob.glob(str(shard))
+        if expanded:
+            resolved.extend(expanded)
+            continue
+
+        shard_path = Path(shard)
+        if shard_path.exists():
+            resolved.append(str(shard_path))
+            continue
+
+        resolved.append(str(shard))
+
+    # Remove duplicates while preserving order
+    return list(dict.fromkeys(resolved))
+
+
+def resolve_outdir(outdir_value):
+    outdir_path = Path(outdir_value)
+
+    if os.name == "nt" and str(outdir_value).startswith("/"):
+        outdir_path = BASE_DIR / str(outdir_value).lstrip("/\\")
+
+    return outdir_path
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Pré-processar e cachear features de fluxo"
@@ -43,11 +72,14 @@ def main():
     parser.add_argument("--log-file", default=None, help="Arquivo de log opcional")
     args = parser.parse_args()
 
+    args.shards = resolve_shards(args.shards)
+
     if not args.shards:
         raise ValueError("Nenhum shard informado/encontrado. Verifique --shards.")
 
-    Path(args.outdir).mkdir(parents=True, exist_ok=True)
-    log_path = setup_run_logging(args.outdir, "preprocess_features", args.log_file)
+    outdir_path = resolve_outdir(args.outdir)
+    outdir_path.mkdir(parents=True, exist_ok=True)
+    log_path = setup_run_logging(str(outdir_path), "preprocess_features", args.log_file)
 
     print("=" * 70)
     print("  PRÉ-PROCESSAMENTO: Extração e Cache de Features")
@@ -86,7 +118,7 @@ def main():
     X_scaled = scaler.fit_transform(merged)
 
     # ── Salvamento em cache ───────────────────────────────────────────
-    cache_path = Path(args.outdir) / args.cache_file
+    cache_path = outdir_path / args.cache_file
     cache_data = {
         "X_scaled": X_scaled,
         "scaler": scaler,
