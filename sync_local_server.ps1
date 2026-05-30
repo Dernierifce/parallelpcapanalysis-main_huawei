@@ -41,8 +41,8 @@ function Get-RemoteTarget {
 
 function Escape-RemoteShellArgument {
     param([string]$Value)
-
-    return "'" + ($Value -replace "'", "'\"'\"'") + "'"
+    # Escape single quotes for safe single-quoted PowerShell argument on remote side
+    return "'" + ($Value -replace "'", "''") + "'"
 }
 
 function Join-RemotePath {
