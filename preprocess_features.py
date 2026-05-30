@@ -25,6 +25,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 
 from feature_extractor import FEATURE_COLS, extract_flows
+from log_utils import setup_run_logging
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_SHARDS = sorted(glob.glob(str(BASE_DIR / "data" / "pcaps" / "*.pcapng")))
@@ -39,16 +40,19 @@ def main():
     parser.add_argument("--shards", nargs="+", default=DEFAULT_SHARDS)
     parser.add_argument("--outdir", default=DEFAULT_OUTDIR)
     parser.add_argument("--cache-file", default=DEFAULT_CACHE_FILE)
+    parser.add_argument("--log-file", default=None, help="Arquivo de log opcional")
     args = parser.parse_args()
 
     if not args.shards:
         raise ValueError("Nenhum shard informado/encontrado. Verifique --shards.")
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
+    log_path = setup_run_logging(args.outdir, "preprocess_features", args.log_file)
 
     print("=" * 70)
     print("  PRÉ-PROCESSAMENTO: Extração e Cache de Features")
     print(f"  Shards: {len(args.shards)}")
+    print(f"  Log: {log_path}")
     print("=" * 70)
 
     t_total_start = time.perf_counter()

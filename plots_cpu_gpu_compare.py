@@ -13,6 +13,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from log_utils import setup_run_logging
+
 
 def _load_pickle(path: str):
     with open(path, "rb") as f:
@@ -27,12 +29,14 @@ def main():
     parser.add_argument("--gpu-results", required=True, help="Saída de gpu_train.py")
     parser.add_argument("--outdir", default=str(Path(__file__).resolve().parent / "data" / "results"))
     parser.add_argument("--basename", default="cpu_gpu_comparison")
+    parser.add_argument("--log-file", default=None, help="Arquivo de log opcional")
     args = parser.parse_args()
 
     cpu = _load_pickle(args.cpu_results)
     gpu = _load_pickle(args.gpu_results)
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
+    log_path = setup_run_logging(args.outdir, "plots_cpu_gpu_compare", args.log_file)
 
     # ── EXTRAIR MÉTRICAS CPU ──────────────────────────────────────────
     cpu_mode = cpu.get("mode", "unknown")
@@ -197,6 +201,7 @@ def main():
 
     print("\n" + "=" * 70)
     print(f"  Gráficos gerados com sucesso!")
+    print(f"  Log: {log_path}")
     print(f"  PNG: {png_path}")
     print(f"  PDF: {pdf_path}")
     print("=" * 70)

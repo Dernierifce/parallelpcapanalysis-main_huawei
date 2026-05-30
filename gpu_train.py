@@ -19,6 +19,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 
 from feature_extractor import FEATURE_COLS, extract_flows
+from log_utils import setup_run_logging
 
 import torch
 import torch.nn as nn
@@ -121,15 +122,18 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--latent-dim", type=int, default=16)
     parser.add_argument("--anom-percentile", type=float, default=95.0)
+    parser.add_argument("--log-file", default=None, help="Arquivo de log opcional")
     args = parser.parse_args()
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
+    log_path = setup_run_logging(args.outdir, "gpu_train", args.log_file)
 
     print("=" * 70)
     print("  Benchmark GPU — Autoencoder")
     print(f"  Device: {'cuda' if torch.cuda.is_available() else 'cpu'}")
     print(f"  Epochs: {args.epochs}")
     print(f"  Batch size: {args.batch_size}")
+    print(f"  Log: {log_path}")
     print("=" * 70)
 
     X_scaled, extraction_time, shard_stats, mode = _load_features(args.cache_file, args.shards)

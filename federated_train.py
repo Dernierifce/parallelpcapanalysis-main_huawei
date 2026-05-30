@@ -21,6 +21,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 from feature_extractor import FEATURE_COLS, extract_flows
+from log_utils import setup_run_logging
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -179,9 +180,11 @@ def main():
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS)
     parser.add_argument("--estimators", type=int, default=DEFAULT_ESTIMATORS)
     parser.add_argument("--contamination", type=float, default=DEFAULT_CONTAMINATION)
+    parser.add_argument("--log-file", default=None, help="Arquivo de log opcional")
     args = parser.parse_args()
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
+    log_path = setup_run_logging(args.outdir, "federated_train", args.log_file)
 
     print("=" * 70)
     print("  PAD — Treinamento Federado (Isolation Forest)")
@@ -189,6 +192,7 @@ def main():
     print(f"  Workers: {args.workers}")
     print(f"  Rounds: {args.rounds}")
     print(f"  N trees: {args.estimators}")
+    print(f"  Log: {log_path}")
     print("=" * 70)
 
     worker_data, extraction_time, shard_stats, mode = _load_features(args.cache_file, args.shards)

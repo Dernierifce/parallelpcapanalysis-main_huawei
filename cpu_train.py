@@ -20,6 +20,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 from feature_extractor import FEATURE_COLS, extract_flows
+from log_utils import setup_run_logging
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -61,16 +62,19 @@ def main():
     parser.add_argument("--cache-file", default=None, help="Cache gerado por preprocess_features.py")
     parser.add_argument("--outdir", default=DEFAULT_OUTDIR)
     parser.add_argument("--outfile", default=DEFAULT_OUTFILE)
+    parser.add_argument("--log-file", default=None, help="Arquivo de log opcional")
     parser.add_argument("--estimators", type=int, default=200)
     parser.add_argument("--contamination", type=float, default=0.05)
     args = parser.parse_args()
 
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
+    log_path = setup_run_logging(args.outdir, "cpu_train", args.log_file)
 
     print("=" * 70)
     print("  Benchmark CPU — Isolation Forest")
     print(f"  Mode: {'CACHE' if args.cache_file else 'FULL'}")
     print(f"  N estimators: {args.estimators}")
+    print(f"  Log: {log_path}")
     print("=" * 70)
 
     X_scaled, extraction_time, shard_stats, mode = _load_features(args.cache_file, args.shards)
