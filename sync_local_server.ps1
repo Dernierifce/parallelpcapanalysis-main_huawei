@@ -1,6 +1,13 @@
+[CmdletBinding()]
 param(
     [string]$TargetPath = "C:\Users\dernier.bruno\parallelpcapanalysis-main_huawei",
-    [switch]$UseGitPull
+    [switch]$UseGitPull,
+    [switch]$Watch,
+    [string]$RemoteHost,
+    [string]$RemoteUser,
+    [int]$RemotePort = 22,
+    [string]$RemotePath = "/opt/parallelpcapanalysis-main_huawei",
+    [string]$SshKeyPath
 )
 
 $sourcePath = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -20,34 +27,209 @@ $filesToSync = @(
     "docs/INSTRUCOES_NOVO_PIPELINE.md"
 )
 
-if (-not (Test-Path $TargetPath)) {
-    throw "Destino não encontrado: $TargetPath"
+function Test-RemoteMode {
+    return -not [string]::IsNullOrWhiteSpace($RemoteHost)
 }
 
-if ($UseGitPull -or (Test-Path (Join-Path $TargetPath ".git"))) {
-    Write-Host "Sincronizando via git pull em $TargetPath"
-    git -C $TargetPath status
-    git -C $TargetPath pull origin main
-    exit $LASTEXITCODE
-}
-
-Write-Host "Sincronizando por cópia em $TargetPath"
-foreach ($relativeFile in $filesToSync) {
-    $sourceFile = Join-Path $sourcePath $relativeFile
-    $targetFile = Join-Path $TargetPath $relativeFile
-    $targetFolder = Split-Path -Parent $targetFile
-
-    if (-not (Test-Path $sourceFile)) {
-        Write-Warning "Arquivo ausente na origem: $relativeFile"
-        continue
+function Get-RemoteTarget {
+    if ([string]::IsNullOrWhiteSpace($RemoteUser)) {
+        return $RemoteHost
     }
 
-    if (-not (Test-Path $targetFolder)) {
-        New-Item -ItemType Directory -Path $targetFolder -Force | Out-Null
-    }
-
-    Copy-Item -Path $sourceFile -Destination $targetFile -Force
-    Write-Host "Copiado: $relativeFile"
+    return "$RemoteUser@$RemoteHost"
 }
 
-Write-Host "Sincronização concluída."
+function Escape-RemoteShellArgument {
+    param([string]$Value)
+
+    return "'" + ($Value -replace "'", "'\"'\"'") + "'"
+}
+
+function Join-RemotePath {
+    param(
+        [string]$BasePath,
+        [string]$RelativePath
+    )
+
+    $normalizedBase = $BasePath.TrimEnd('/')
+    $normalizedRelative = $RelativePath -replace '\\', '/'
+    return "$normalizedBase/$normalizedRelative"
+}
+
+function Get-RemoteParentPath {
+    param([string]$Path)
+
+    $normalized = $Path -replace '\\', '/'
+    $lastSlash = $normalized.LastIndexOf('/')
+    if ($lastSlash -lt 0) {
+        return ""
+    }
+
+    return $normalized.Substring(0, $lastSlash)
+}
+
+function Assert-CommandAvailable {
+    param([string]$CommandName)
+
+    if (-not (Get-Command $CommandName -ErrorAction SilentlyContinue)) {
+        throw "$CommandName nao encontrado no PATH. Instale o cliente OpenSSH ou ajuste o ambiente antes de usar deploy remoto."
+    }
+}
+
+function Invoke-RemoteCommand {
+    param([string]$Command)
+
+    Assert-CommandAvailable -CommandName "ssh"
+
+    $sshArgs = @()
+    if ($SshKeyPath) {
+        $sshArgs += @("-i", $SshKeyPath)
+    }
+    if ($RemotePort -gt 0) {
+        $sshArgs += @("-p", $RemotePort)
+    }
+
+    & ssh @sshArgs (Get-RemoteTarget) $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha ao executar comando remoto: $Command"
+    }
+}
+
+function Invoke-RemoteCopy {
+    param(
+        [string]$SourceFile,
+        [string]$DestinationFile
+    )
+
+    Assert-CommandAvailable -CommandName "scp"
+
+    $scpArgs = @()
+    if ($SshKeyPath) {
+        $scpArgs += @("-i", $SshKeyPath)
+    }
+    if ($RemotePort -gt 0) {
+        $scpArgs += @("-P", $RemotePort)
+    }
+
+    & scp @scpArgs $SourceFile "$((Get-RemoteTarget)):$DestinationFile"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falha ao copiar $SourceFile para $DestinationFile"
+    }
+}
+
+function Get-SourceSnapshot {
+    $items = foreach ($relativeFile in $filesToSync) {
+        $sourceFile = Join-Path $sourcePath $relativeFile
+        if (Test-Path $sourceFile) {
+            $item = Get-Item $sourceFile
+            [PSCustomObject]@{
+                Path = $relativeFile
+                Length = $item.Length
+                LastWriteTimeUtc = $item.LastWriteTimeUtc.Ticks
+            }
+        }
+        else {
+            [PSCustomObject]@{
+                Path = $relativeFile
+                Missing = $true
+            }
+        }
+    }
+
+    return ($items | ConvertTo-Json -Compress -Depth 3)
+}
+
+function Sync-LocalCopy {
+    param([string]$DestinationPath)
+
+    if (-not (Test-Path $DestinationPath)) {
+        throw "Destino nao encontrado: $DestinationPath"
+    }
+
+    Write-Host "Sincronizando por copia em $DestinationPath"
+    foreach ($relativeFile in $filesToSync) {
+        $sourceFile = Join-Path $sourcePath $relativeFile
+        $targetFile = Join-Path $DestinationPath $relativeFile
+        $targetFolder = Split-Path -Parent $targetFile
+
+        if (-not (Test-Path $sourceFile)) {
+            Write-Warning "Arquivo ausente na origem: $relativeFile"
+            continue
+        }
+
+        if (-not (Test-Path $targetFolder)) {
+            New-Item -ItemType Directory -Path $targetFolder -Force | Out-Null
+        }
+
+        Copy-Item -Path $sourceFile -Destination $targetFile -Force
+        Write-Host "Copiado: $relativeFile"
+    }
+}
+
+function Sync-RemoteCopy {
+    $remoteTarget = Get-RemoteTarget
+    $normalizedRemoteRoot = $RemotePath.TrimEnd('/')
+
+    Write-Host "Sincronizando remotamente em $remoteTarget:$normalizedRemoteRoot"
+    Invoke-RemoteCommand "mkdir -p $(Escape-RemoteShellArgument -Value $normalizedRemoteRoot)"
+
+    foreach ($relativeFile in $filesToSync) {
+        $sourceFile = Join-Path $sourcePath $relativeFile
+
+        if (-not (Test-Path $sourceFile)) {
+            Write-Warning "Arquivo ausente na origem: $relativeFile"
+            continue
+        }
+
+        $remoteFile = Join-RemotePath -BasePath $normalizedRemoteRoot -RelativePath $relativeFile
+        $remoteFolder = Get-RemoteParentPath -Path $remoteFile
+
+        if (-not [string]::IsNullOrWhiteSpace($remoteFolder)) {
+            Invoke-RemoteCommand "mkdir -p $(Escape-RemoteShellArgument -Value $remoteFolder)"
+        }
+
+        Invoke-RemoteCopy -SourceFile $sourceFile -DestinationFile $remoteFile
+        Write-Host "Copiado: $relativeFile"
+    }
+}
+
+function Sync-Project {
+    if (Test-RemoteMode) {
+        Sync-RemoteCopy
+        return
+    }
+
+    if ($UseGitPull -or (Test-Path (Join-Path $TargetPath ".git"))) {
+        if (-not (Test-Path $TargetPath)) {
+            throw "Destino nao encontrado: $TargetPath"
+        }
+
+        Write-Host "Sincronizando via git pull em $TargetPath"
+        git -C $TargetPath status
+        git -C $TargetPath pull origin main
+        if ($LASTEXITCODE -ne 0) {
+            throw "git pull falhou em $TargetPath"
+        }
+
+        return
+    }
+
+    Sync-LocalCopy -DestinationPath $TargetPath
+}
+
+if ($Watch) {
+    Write-Host "Modo monitoramento ativo. Pressione Ctrl+C para encerrar."
+    $lastSnapshot = $null
+
+    while ($true) {
+        $currentSnapshot = Get-SourceSnapshot
+        if ($currentSnapshot -ne $lastSnapshot) {
+            Sync-Project
+            $lastSnapshot = $currentSnapshot
+        }
+
+        Start-Sleep -Seconds 2
+    }
+}
+
+Sync-Project

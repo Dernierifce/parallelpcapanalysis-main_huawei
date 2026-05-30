@@ -48,6 +48,25 @@ Para extração de features, este projeto depende do TShark. No Windows, instale
 
 Cada etapa também grava e reaproveita um log separado em `data/results/pipeline_steps.txt` por padrão. Se quiser outro destino, use `--log-file`.
 
+## Deploy automatico para servidor remoto
+
+O script [sync_local_server.ps1](sync_local_server.ps1) agora aceita um modo de deploy remoto com SSH/SCP e opcao de monitoramento continuo.
+
+Exemplo de uso:
+
+```powershell
+.
+\sync_local_server.ps1 -RemoteHost 192.168.1.50 -RemoteUser ubuntu -RemotePath /opt/parallelpcapanalysis-main_huawei -SshKeyPath C:\Users\voce\.ssh\id_ed25519 -Watch
+```
+
+Se voce nao quiser modo continuo, remova `-Watch` para fazer apenas uma sincronizacao. O script copia os arquivos listados para o servidor remoto sempre que detecta mudancas.
+
+Requisitos:
+
+- `ssh` e `scp` disponiveis no PATH do Windows.
+- Acesso por chave ou outra autenticacao sem prompt interativo.
+- O diretorio remoto precisa ser gravavel pelo usuario SSH.
+
 ## Fluxo recomendado
 
 1. Gerar o cache de features:
