@@ -61,6 +61,15 @@ Exemplo de uso:
 
 O script já vem com `172.16.3.103`, `LABHUAWEI\dernier.bruno` e `C:\Users\dernier.bruno\parallelpcapanalysis-main_huawei` como padrões. Se voce nao quiser modo continuo, remova `-Watch` para fazer apenas uma sincronizacao. O script copia os arquivos listados para o servidor remoto sempre que detecta mudancas.
 
+Flag nova: `-ForceClone`
+
+- Use `-UseGitPull -ForceClone` para forçar um `git clone` remoto: a pasta remota será removida e recriada com o clone do `origin` local.
+- Exemplo (forçar clone uma vez):
+
+```powershell
+.\sync_local_server.ps1 -UseGitPull -ForceClone -SshKeyPath C:\Users\voce\.ssh\id_ed25519
+```
+
 Requisitos:
 
 - `ssh` e `scp` disponiveis no PATH do Windows.

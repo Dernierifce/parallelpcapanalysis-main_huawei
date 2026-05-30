@@ -2,6 +2,7 @@
 param(
     [string]$TargetPath = "C:\Users\dernier.bruno\parallelpcapanalysis-main_huawei",
     [switch]$UseGitPull,
+    [switch]$ForceClone,
     [switch]$Watch,
     [string]$RemoteHost = "172.16.3.103",
     [string]$RemoteUser = "LABHUAWEI\dernier.bruno",
@@ -217,11 +218,30 @@ function Sync-RemoteCopy {
 function Sync-Project {
     if (Test-RemoteMode) {
         if ($UseGitPull) {
-            Write-Host "Executando git pull no remoto $((Get-RemoteTarget)):$RemotePath"
+            Write-Host "Executando git pull/clone no remoto $((Get-RemoteTarget)):$RemotePath"
+
+            # Obter origin URL local para usar em clone remoto, se necessario
+            $originUrl = (git -C $sourcePath config --get remote.origin.url) -join "" 
+            if (-not $originUrl) {
+                throw "Nao foi possivel obter remote.origin.url do repositorio local. Configure o remote origin antes de usar -UseGitPull remoto."
+            }
+
             $remoteShellPath = Convert-ToRemoteShellPath -Path $RemotePath
-            $gitCmd = "powershell -NoProfile -Command \"git -C $(Escape-RemoteShellArgument -Value $remoteShellPath) pull origin main\""
-            Invoke-RemoteCommand $gitCmd
-            Write-Host "git pull remoto concluido."
+            $escapedPath = Escape-RemoteShellArgument -Value $remoteShellPath
+            $escapedOrigin = Escape-RemoteShellArgument -Value $originUrl
+
+                if ($ForceClone) {
+                    Write-Host "Forcando clone remoto (removendo pasta existente, se houver)."
+                    $remoteCmd = "if (Test-Path $escapedPath) { Remove-Item -Recurse -Force $escapedPath } ; git clone $escapedOrigin $escapedPath"
+                }
+                else {
+                    $remoteCmd = "if (Test-Path ($escapedPath + '\\.git')) { git -C $escapedPath pull origin main } else { git clone $escapedOrigin $escapedPath }"
+                }
+
+                $psCmd = "powershell -NoProfile -Command \"$remoteCmd\""
+
+                Invoke-RemoteCommand $psCmd
+            Write-Host "Operacao git remota concluida."
             return
         }
 
