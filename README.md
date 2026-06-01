@@ -47,34 +47,9 @@ Para GPU, o pacote `requirements-gpu.txt` inclui PyTorch.
 Para extração de features, este projeto depende do TShark. No Windows, instale o Wireshark e verifique se `tshark.exe` está no PATH, ou defina `TSHARK_PATH` com o caminho completo do executável.
 
 Cada etapa grava um relatório detalhado em `data/results/log.txt` por padrão, incluindo tempos, volume processado, rounds/épocas e resumo comparativo. Se quiser outro destino, use `--log-file`.
+Cada passo de deploy automático foi removido deste repositório.
 
-## Deploy automatico para servidor remoto
-
-O script [sync_local_server.ps1](sync_local_server.ps1) agora aceita um modo de deploy remoto com SSH/SCP e opcao de monitoramento continuo.
-
-Exemplo de uso:
-
-```powershell
-.
-\sync_local_server.ps1 -Watch -SshKeyPath C:\Users\voce\.ssh\id_ed25519
-```
-
-O script já vem com `172.16.3.103`, `LABHUAWEI\dernier.bruno` e `C:\Users\dernier.bruno\parallelpcapanalysis-main_huawei` como padrões. Se voce nao quiser modo continuo, remova `-Watch` para fazer apenas uma sincronizacao. O script copia os arquivos listados para o servidor remoto sempre que detecta mudancas.
-
-Flag nova: `-ForceClone`
-
-- Use `-UseGitPull -ForceClone` para forçar um `git clone` remoto: a pasta remota será removida e recriada com o clone do `origin` local.
-- Exemplo (forçar clone uma vez):
-
-```powershell
-.\sync_local_server.ps1 -UseGitPull -ForceClone -SshKeyPath C:\Users\voce\.ssh\id_ed25519
-```
-
-Requisitos:
-
-- `ssh` e `scp` disponiveis no PATH do Windows.
-- Acesso por chave ou outra autenticacao sem prompt interativo.
-- O diretorio remoto precisa ser gravavel pelo usuario SSH.
+Nota: O script `sync_local_server.ps1` foi removido. Para deploys automáticos, favor usar sua solução de CI/CD preferida (GitHub Actions, GitLab CI, Azure Pipelines, etc.) ou scripts personalizados externos.
 
 ## Fluxo recomendado
 
