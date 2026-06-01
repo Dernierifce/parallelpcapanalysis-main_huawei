@@ -41,7 +41,7 @@ Thumbs.db
 
 # Logs
 *.log
-data/results/pipeline_steps.txt
+data/results/log.txt
 
 # Resultados gerados
 *.pkl

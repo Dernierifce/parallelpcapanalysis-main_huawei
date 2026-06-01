@@ -46,7 +46,7 @@ Para GPU, o pacote `requirements-gpu.txt` inclui PyTorch.
 
 Para extração de features, este projeto depende do TShark. No Windows, instale o Wireshark e verifique se `tshark.exe` está no PATH, ou defina `TSHARK_PATH` com o caminho completo do executável.
 
-Cada etapa também grava e reaproveita um log separado em `data/results/pipeline_steps.txt` por padrão. Se quiser outro destino, use `--log-file`.
+Cada etapa grava um relatório detalhado em `data/results/log.txt` por padrão, incluindo tempos, volume processado, rounds/épocas e resumo comparativo. Se quiser outro destino, use `--log-file`.
 
 ## Deploy automatico para servidor remoto
 
@@ -97,6 +97,17 @@ python gpu_train.py --cache-file ./data/results/features_cache.pkl --outdir ./da
 ```bash
 python plots_cpu_gpu_compare.py --cpu-results ./data/results/cpu_results.pkl --gpu-results ./data/results/gpu_results.pkl --outdir ./data/results --basename cpu_gpu_comparison
 ```
+
+## Resumo consolidado
+
+Depois de gerar os resultados, você pode criar um resumo final consolidado (CPU, federado, GPU) com:
+
+```bash
+python summarize_results.py --results ./data/results/cpu_results.pkl ./data/results/cpu_federated_results.pkl ./data/results/gpu_results.pkl --names CPU FED GPU --outdir ./data/results
+```
+
+O resumo será gravado em `data/results/log.txt` (ou no arquivo indicado por `--log-file`).
+
 
 ## Treino federado
 

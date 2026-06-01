@@ -13,7 +13,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from log_utils import setup_run_logging
+from log_utils import emit_report, setup_run_logging
 
 
 def _load_pickle(path: str):
@@ -199,19 +199,41 @@ def main():
     fig.savefig(png_path, dpi=180, bbox_inches="tight")
     fig.savefig(pdf_path, bbox_inches="tight")
 
-    print("\n" + "=" * 70)
-    print(f"  Gráficos gerados com sucesso!")
-    print(f"  Log: {log_path}")
-    print(f"  PNG: {png_path}")
-    print(f"  PDF: {pdf_path}")
-    print("=" * 70)
-    print(f"\n  Resumo da Comparação:")
-    print(f"  ─────────────────────")
-    print(f"  Modo: {comparison_mode}")
-    print(f"  CPU ({cpu_mode}): {cpu_time_used:.1f}s")
-    print(f"  GPU ({gpu_mode}): {gpu_time_used:.1f}s")
-    print(f"  Speedup: {speedup:.2f}×")
-    print("=" * 70)
+    winner = "GPU benchmark" if gpu_time_used < cpu_time_used else "CPU federado"
+    emit_report(
+        "Relatório detalhado — plots_cpu_gpu_compare",
+        {
+            "Fontes": {
+                "cpu_results": args.cpu_results,
+                "gpu_results": args.gpu_results,
+                "modo_comparacao": comparison_mode,
+            },
+            "CPU": {
+                "mode": cpu_mode,
+                "fluxos": cpu_flows,
+                "anomalias": cpu_anom,
+                "taxa_anomalia_pct": f"{cpu_rate * 100:.2f}%",
+                "tempo_classificacao_s": round(cpu_time_used, 3),
+            },
+            "GPU": {
+                "mode": gpu_mode,
+                "fluxos": gpu_flows,
+                "anomalias": gpu_anom,
+                "taxa_anomalia_pct": f"{gpu_rate * 100:.2f}%",
+                "tempo_classificacao_s": round(gpu_time_used, 3),
+            },
+            "Comparação": {
+                "speedup": f"{speedup:.2f}x",
+                "vencedor": winner,
+                "gpu_extracao_s": round(gpu_extract, 3),
+            },
+            "Resultados": {
+                "log": log_path,
+                "png": png_path,
+                "pdf": pdf_path,
+            },
+        },
+    )
 
 
 if __name__ == "__main__":

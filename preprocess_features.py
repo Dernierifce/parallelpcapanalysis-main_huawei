@@ -26,7 +26,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 
 from feature_extractor import FEATURE_COLS, extract_flows
-from log_utils import setup_run_logging
+from log_utils import emit_report, setup_run_logging
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_SHARDS = sorted(glob.glob(str(BASE_DIR / "data" / "pcaps" / "*.pcapng")))
@@ -131,14 +131,30 @@ def main():
     with open(cache_path, "wb") as f:
         pickle.dump(cache_data, f)
 
-    print("\n" + "=" * 70)
-    print(f"  ✓ Cache salvo: {cache_path}")
-    print(f"  Fluxos totais: {X_scaled.shape[0]:,}")
-    print(f"  Features: {X_scaled.shape[1]}")
-    print(f"  Tempo extração total: {extraction_time:.1f}s")
-    print("=" * 70)
+    emit_report(
+        "Relatório detalhado — preprocess_features",
+        {
+            "Configuração": {
+                "shards": len(args.shards),
+                "cache_file": cache_path,
+                "outdir": outdir_path,
+            },
+            "Volume processado": {
+                "fluxos_totais": int(X_scaled.shape[0]),
+                "features": int(X_scaled.shape[1]),
+                "tempo_extracao_total_s": round(extraction_time, 3),
+            },
+            "Shards": [
+                f"{Path(item['shard_path']).name}: fluxos={item['n_flows']:,} | extração={item['extract_s']:.2f}s"
+                for item in shard_stats
+            ],
+            "Resultado": {
+                "cache_salvo_em": cache_path,
+                "modo": "pré-processamento para reutilização em CPU/Federado/GPU",
+            },
+        },
+    )
     print("\nPróximo passo: usar --cache-file em gpu_train.py e federated_train.py")
-    print("=" * 70)
 
 
 if __name__ == "__main__":

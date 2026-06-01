@@ -30,7 +30,7 @@ if "app_logs" not in st.session_state:
     st.session_state["app_logs"] = ""
 log_exp = st.sidebar.expander("Logs", expanded=True)
 log_output = log_exp.empty()
-LOG_PATH = RESULTS_DIR / "pipeline_steps.txt"
+LOG_PATH = RESULTS_DIR / "log.txt"
 
 
 def run_command(command):
@@ -246,7 +246,7 @@ with st.expander("Upload e Processamento Rápido", expanded=True):
                 quick_cpu_out,
             ]
             with st.spinner("Executando CPU rápido..."):
-                code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
+                code, output = run_python_command_stream(args, out_container=log_output)
             if code == 0:
                 st.success("Treino CPU rápido concluído.")
             else:
@@ -274,7 +274,7 @@ with st.expander("Upload e Processamento Rápido", expanded=True):
                 "95.0",
             ]
             with st.spinner("Executando GPU rápido..."):
-                code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
+                code, output = run_python_command_stream(args, out_container=log_output)
             if code == 0:
                 st.success("Benchmark GPU rápido concluído.")
             else:
@@ -293,7 +293,7 @@ with st.expander("Upload e Processamento Rápido", expanded=True):
             quick_chart_base,
         ]
         with st.spinner("Gerando chart rápido..."):
-            code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
+            code, output = run_python_command_stream(args, out_container=log_output)
         if code == 0:
             st.success("Chart rápido gerado.")
         else:
@@ -415,7 +415,7 @@ with tab_cpu:
                 cpu_outfile,
             ]
             with st.spinner("Executando treino CPU..."):
-                code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
+                code, output = run_python_command_stream(args, out_container=log_output)
             if code == 0:
                 st.success("Treino CPU concluído.")
             else:
@@ -458,7 +458,7 @@ with tab_fed:
                 fed_outfile,
             ]
             with st.spinner("Executando treino federado..."):
-                code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
+                code, output = run_python_command_stream(args, out_container=log_output)
             if code == 0:
                 st.success("Treino federado concluído.")
             else:
@@ -501,7 +501,7 @@ with tab_gpu:
                 str(gpu_percentile),
             ]
             with st.spinner("Executando benchmark GPU..."):
-                code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
+                code, output = run_python_command_stream(args, out_container=log_output)
             if code == 0:
                 st.success("Benchmark GPU concluído.")
             else:
@@ -529,7 +529,7 @@ with tab_methods:
                 cache_name,
             ]
             with st.spinner("Executando pré-processamento... Isso pode demorar:"):
-                code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
+                code, output = run_python_command_stream(args, out_container=log_output)
             if code == 0:
                 st.success("Cache gerado com sucesso.")
             else:
@@ -609,7 +609,7 @@ with tab_methods:
                     continue
 
                 with st.spinner(f"Executando {m} ..."):
-                    code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
+                    code, output = run_python_command_stream(args, out_container=log_output)
                 if code == 0:
                     st.success(f"{m} concluído -> {outname}")
                     results_files.append(str(RESULTS_DIR / outname))
@@ -641,7 +641,7 @@ with tab_charts:
             base_name,
         ]
         with st.spinner("Gerando chart..."):
-            code, output = run_python_command_stream(args, out_container=log_output, log_file=LOG_PATH)
+                code, output = run_python_command_stream(args, out_container=log_output)
         if code == 0:
             st.success("Chart gerado com sucesso.")
         else:

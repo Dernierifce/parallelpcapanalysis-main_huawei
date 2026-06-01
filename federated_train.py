@@ -21,7 +21,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 from feature_extractor import FEATURE_COLS, extract_flows
-from log_utils import setup_run_logging
+from log_utils import emit_report, setup_run_logging
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -269,19 +269,50 @@ def main():
     with open(out_path, "wb") as f:
         pickle.dump(out, f)
 
-    print("\n" + "=" * 70)
-    print(f"  Method: {out['method']}")
-    print(f"  Backend: {out['backend']}")
-    print(f"  Mode: {mode.upper()}")
-    print(f"  Rounds: {args.rounds}")
-    print(f"  Workers: {n_workers}")
-    print(f"  Fluxos: {out['n_flows']:,}")
-    print(f"  Anomalias: {out['n_anomalies']:,} ({out['anom_rate'] * 100:.2f}%)")
-    print(f"  Extração: {extraction_time:.1f}s")
-    print(f"  Classificação (serial eq): {out['times']['classification_s']:.1f}s")
-    print(f"  Tempo total: {total_time:.1f}s")
-    print(f"  Resultado: {out_path}")
-    print("=" * 70)
+    round_lines = [
+        (
+            f"Round {item['round']}: fluxos={item['total_flows']:,} | anomalias={item['total_anom']:,} "
+            f"({item['anom_rate'] * 100:.2f}%) | round={item['round_time_s']:.2f}s | "
+            f"serial_eq={item['serial_eq_s']:.2f}s | speedup={item['speedup']:.2f}x | "
+            f"eficiencia={item['efficiency'] * 100:.1f}%"
+        )
+        for item in history
+    ] or ["Sem rounds executados"]
+
+    emit_report(
+        "Relatório detalhado — federated_train",
+        {
+            "Configuração": {
+                "metodo": out["method"],
+                "backend": out["backend"],
+                "mode": mode,
+                "rounds": args.rounds,
+                "workers": n_workers,
+                "estimators": args.estimators,
+                "contamination": args.contamination,
+            },
+            "Volume processado": {
+                "fluxos": int(out["n_flows"]),
+                "anomalias": f"{out['n_anomalies']:,}",
+                "taxa_anomalia_pct": f"{out['anom_rate'] * 100:.2f}%",
+                "rounds_executados": len(history),
+            },
+            "Tempos": {
+                "extracao_s": round(extraction_time, 3),
+                "classificacao_serial_equivalente_s": round(out['times']['classification_s'], 3),
+                "tempo_total_s": round(total_time, 3),
+            },
+            "Rounds": round_lines,
+            "Shards": [
+                f"{Path(item['shard_path']).name}: fluxos={item['n_flows']:,} | extração={item.get('extract_s', 0.0):.2f}s"
+                for item in shard_stats
+            ] or ["Sem shards detalhados disponíveis"],
+            "Resultado": {
+                "arquivo_saida": out_path,
+                "speedup_medio_final": f"{history[-1]['speedup']:.2f}x" if history else "n/a",
+            },
+        },
+    )
 
 
 if __name__ == "__main__":

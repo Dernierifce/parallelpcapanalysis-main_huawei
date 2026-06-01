@@ -19,7 +19,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 
 from feature_extractor import FEATURE_COLS, extract_flows
-from log_utils import setup_run_logging
+from log_utils import emit_report, setup_run_logging
 
 import torch
 import torch.nn as nn
@@ -182,20 +182,42 @@ def main():
     with open(out_path, "wb") as f:
         pickle.dump(out, f)
 
-    print("\n" + "=" * 70)
-    print(f"  Method: {out['method']}")
-    print(f"  Backend: {device}")
-    print(f"  Mode: {mode.upper()}")
-    print(f"  Fluxos: {X_scaled.shape[0]:,}")
-    print(f"  Anomalias: {n_anom:,} ({n_anom / X_scaled.shape[0] * 100:.2f}%)")
-    print(f"  Extração: {extraction_time:.1f}s")
-    print(f"  Treino: {train_time:.1f}s")
-    print(f"  Inferência: {infer_time:.1f}s")
-    print(f"  ► Classificação (train+infer): {classification_time:.1f}s ◄ [MÉTRICA]")
-    print(f"  Total (incl. extração): {total_time:.1f}s")
-    print(f"  Threshold p{percentile:.1f}: {threshold:.6g}")
-    print(f"  Resultado: {out_path}")
-    print("=" * 70)
+    emit_report(
+        "Relatório detalhado — gpu_train",
+        {
+            "Configuração": {
+                "metodo": out["method"],
+                "backend": device,
+                "mode": mode,
+                "epochs": args.epochs,
+                "batch_size": args.batch_size,
+                "latent_dim": args.latent_dim,
+                "anom_percentile": percentile,
+            },
+            "Volume processado": {
+                "fluxos": int(X_scaled.shape[0]),
+                "features": int(X_scaled.shape[1]),
+                "anomalias": f"{n_anom:,}",
+                "taxa_anomalia_pct": f"{n_anom / X_scaled.shape[0] * 100:.2f}%",
+            },
+            "Tempos": {
+                "extracao_s": round(extraction_time, 3),
+                "treino_s": round(train_time, 3),
+                "inferencia_s": round(infer_time, 3),
+                "classificacao_s": round(classification_time, 3),
+                "total_s": round(total_time, 3),
+            },
+            "Shards": [
+                f"{Path(item['shard_path']).name}: fluxos={item['n_flows']:,} | extração={item.get('extract_s', 0.0):.2f}s"
+                for item in shard_stats
+            ] or ["Sem shards detalhados disponíveis"],
+            "Resultado": {
+                "threshold": f"p{percentile:.1f} -> {threshold:.6g}",
+                "arquivo_saida": out_path,
+                "classificacao_metrica_principal": f"{classification_time:.1f}s (train + infer)",
+            },
+        },
+    )
 
 
 if __name__ == "__main__":
