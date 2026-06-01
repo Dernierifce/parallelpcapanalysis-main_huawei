@@ -429,9 +429,9 @@ fig.suptitle(
     fontsize=12, y=1.005, color=P["text"], fontweight="bold"
 )
 
-plt.savefig("/data/results/figura_pad_artigo.pdf",
+plt.savefig(os.path.join(args.outdir, "figura_pad_artigo.pdf"),
             dpi=300, bbox_inches="tight", facecolor=P["bg"])
-plt.savefig("/data/results/figura_pad_artigo.png",
+plt.savefig(os.path.join(args.outdir, "figura_pad_artigo.png"),
             dpi=300, bbox_inches="tight", facecolor=P["bg"])
 plt.show()
 print("Figuras salvas: figura_pad_artigo.pdf + .png (300 dpi)")
