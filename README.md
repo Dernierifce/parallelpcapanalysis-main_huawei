@@ -1,105 +1,48 @@
-﻿# Parallel PCAP Analysis
+# parallelpcapanalysis-main_huawei
 
-Projeto para análise de tráfego de rede em PCAP com foco em comparar o custo computacional da classificação de anomalias. A estrutura foi organizada para manter código, documentação e artefatos gerados separados, facilitando versionamento no Git.
+Projeto enxuto para um artigo com dois experimentos comparativos:
 
-## Estrutura
+- Autoencoder: CPU vs GPU
+- K-Means: CPU (scikit-learn) vs GPU (RAPIDS cuML)
 
-- feature_extractor.py: extração de features por fluxo com pyshark.
-- preprocess_features.py: pré-processamento e cache das features.
-- cpu_train.py: benchmark de Isolation Forest em CPU.
-- federated_train.py: benchmark federado de Isolation Forest em CPU.
-- gpu_train.py: benchmark de Autoencoder em GPU com PyTorch.
-- plots_cpu_gpu_compare.py: comparação entre resultados de CPU e GPU.
-- plots_pad_artigo.py: figura auxiliar para artigo.
-- app_gpu_dashboard.py: dashboard Streamlit para upload, execução e visualização.
+O foco e medir tempo de treino, tempo de inferencia e speedup para comparar Deep Learning e Machine Learning classico em CPU e GPU.
 
-## Pastas
+## Execucao
 
-- docs/: instruções detalhadas e documentação complementar.
-- data/pcaps/: local para capturas de rede usadas no pipeline.
-- data/results/: local para caches, métricas e saídas geradas.
-
-## Execução local
-
-Crie as pastas do projeto, se ainda não existirem:
+Instale as dependencias principais:
 
 ```powershell
-New-Item -ItemType Directory -Path '.\data\pcaps' -Force
-New-Item -ItemType Directory -Path '.\data\results' -Force
-```
-
-Instale as dependências principais com:
-
-```bash
 pip install -r requirements.txt
 ```
 
-Se for usar a versão com GPU, instale também:
+Se for usar GPU com Autoencoder, PyTorch precisa estar disponivel. Para o K-Means em GPU, use um ambiente com RAPIDS cuML compativel com sua stack CUDA.
 
-```bash
-pip install -r requirements-gpu.txt
+Rode o artigo em um comando:
+
+```powershell
+.\run_article.ps1
 ```
 
-Observação: a etapa GPU usa PyTorch e roda em `cuda` quando disponível.
+Para incluir os testes de GPU quando o ambiente suportar:
 
-Para GPU, o pacote `requirements-gpu.txt` inclui PyTorch.
-
-Para extração de features, este projeto depende do TShark. No Windows, instale o Wireshark e verifique se `tshark.exe` está no PATH, ou defina `TSHARK_PATH` com o caminho completo do executável.
-
-Cada etapa grava um relatório detalhado em `data/results/log.txt` por padrão, incluindo tempos, volume processado, rounds/épocas e resumo comparativo. Se quiser outro destino, use `--log-file`.
-Cada passo de deploy automático foi removido deste repositório.
-
-Nota: O script `sync_local_server.ps1` foi removido. Para deploys automáticos, favor usar sua solução de CI/CD preferida (GitHub Actions, GitLab CI, Azure Pipelines, etc.) ou scripts personalizados externos.
-
-## Fluxo recomendado
-
-1. Gerar o cache de features:
-
-```bash
-python preprocess_features.py --shards ./data/pcaps/*.pcapng --outdir ./data/results --cache-file features_cache.pkl
+```powershell
+.\run_article.ps1 -RunGpuAutoencoder -RunGpuKMeans
 ```
 
-1. Executar os benchmarks usando o cache:
+## Saidas
 
-```bash
-python cpu_train.py --cache-file ./data/results/features_cache.pkl --outdir ./data/results --outfile cpu_results.pkl
-python federated_train.py --cache-file ./data/results/features_cache.pkl --outdir ./data/results --outfile cpu_federated_results.pkl
-python gpu_train.py --cache-file ./data/results/features_cache.pkl --outdir ./data/results --outfile gpu_results.pkl
-```
+- `results/benchmark_results.json`
+- `results/article_table.md`
+- `results/article_table.csv`
+- `figures/train_time.png`
+- `figures/inference_time.png`
+- `figures/speedup.png`
 
-1. Gerar os gráficos comparativos:
+## Estrutura
 
-```bash
-python plots_cpu_gpu_compare.py --cpu-results ./data/results/cpu_results.pkl --gpu-results ./data/results/gpu_results.pkl --outdir ./data/results --basename cpu_gpu_comparison
-```
+- `scripts/benchmark_article.py`: executa os benchmarks e gera tabela/figuras
+- `run_article.ps1`: comando unico para rodar o artigo
 
-## Resumo consolidado
+## Observacao
 
-Depois de gerar os resultados, você pode criar um resumo final consolidado (CPU, federado, GPU) com:
-
-```bash
-python summarize_results.py --results ./data/results/cpu_results.pkl ./data/results/cpu_federated_results.pkl ./data/results/gpu_results.pkl --names CPU FED GPU --outdir ./data/results
-```
-
-O resumo será gravado em `data/results/log.txt` (ou no arquivo indicado por `--log-file`).
-
-
-## Treino federado
-
-Se você quiser rodar o federado isoladamente, use:
-
-```bash
-python federated_train.py --cache-file ./data/results/features_cache.pkl --outdir ./data/results --outfile cpu_federated_results.pkl --rounds 6 --workers 4
-```
-
-Esse fluxo continua usando Isolation Forest na CPU, mas com agregação federada entre shards.
-
-## Dashboard
-
-Inicie a interface com:
-
-```bash
-streamlit run app_gpu_dashboard.py
-```
-
-O dashboard organiza o fluxo em abas para hardware, PCAPs, treino CPU, Autoencoder GPU, métodos e gráficos.
+Se o cache `data/results/features_cache.pkl` existir, o runner pode reutiliza-lo. Caso contrario, ele usa dados sinteticos para manter o fluxo executavel mesmo sem PCAPs.
