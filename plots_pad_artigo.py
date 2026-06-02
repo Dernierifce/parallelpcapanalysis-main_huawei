@@ -20,6 +20,10 @@ from scipy.optimize import curve_fit
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 
+# Diretório de saída atualizado: salva em data/results na raiz do repositório
+OUTDIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "data", "results"))
+os.makedirs(OUTDIR, exist_ok=True)
+
 # ── Paleta ──────────────────────────────────────────────────────
 P = dict(
     bg      = "#0D1117",
@@ -430,9 +434,9 @@ fig.suptitle(
     fontsize=12, y=1.005, color=P["text"], fontweight="bold"
 )
 
-plt.savefig(os.path.join(args.outdir, "figura_pad_artigo.pdf"),
-            dpi=300, bbox_inches="tight", facecolor=P["bg"])
-plt.savefig(os.path.join(args.outdir, "figura_pad_artigo.png"),
-            dpi=300, bbox_inches="tight", facecolor=P["bg"])
+pdf_path = os.path.join(OUTDIR, "figura_pad_artigo.pdf")
+png_path = os.path.join(OUTDIR, "figura_pad_artigo.png")
+plt.savefig(pdf_path, dpi=300, bbox_inches="tight", facecolor=P["bg"])
+plt.savefig(png_path, dpi=300, bbox_inches="tight", facecolor=P["bg"])
 plt.show()
-print("Figuras salvas: figura_pad_artigo.pdf + .png (300 dpi)")
+print(f"Figuras salvas: {pdf_path} + {png_path} (300 dpi)")
