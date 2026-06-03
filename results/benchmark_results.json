@@ -1,0 +1,68 @@
+{
+  "source": {
+    "source": "data\\results\\features_cache.pkl",
+    "n_features": 22,
+    "n_rows": 146699,
+    "mode": "cache",
+    "sampled": true,
+    "n_rows_used": 5000
+  },
+  "arguments": {
+    "cache_file": ".\\data\\results\\features_cache.pkl",
+    "outdir": ".",
+    "sample_size": 5000,
+    "synthetic_samples": 6000,
+    "synthetic_features": 16,
+    "ae_epochs": 12,
+    "ae_batch_size": 256,
+    "ae_latent_dim": 8,
+    "ae_lr": 0.001,
+    "kmeans_clusters": 8,
+    "kmeans_max_iter": 300,
+    "run_gpu_autoencoder": true,
+    "run_gpu_kmeans": true
+  },
+  "results": [
+    {
+      "experiment": "Autoencoder",
+      "hardware": "CPU",
+      "train_s": 0.6542217000387609,
+      "infer_s": 0.02073349989950657,
+      "classification_s": 0.6749551999382675,
+      "speedup": 1.0,
+      "status": "ok",
+      "notes": "threshold sample=5000"
+    },
+    {
+      "experiment": "Autoencoder",
+      "hardware": "GPU",
+      "train_s": 0.7503510999958962,
+      "infer_s": 0.04475830006413162,
+      "classification_s": 0.7951094000600278,
+      "speedup": 0.8488834365274902,
+      "status": "ok",
+      "notes": "threshold sample=5000"
+    },
+    {
+      "experiment": "K-Means",
+      "hardware": "CPU",
+      "train_s": 1.706144600175321,
+      "infer_s": 0.0004191999323666096,
+      "classification_s": 1.7065638001076877,
+      "speedup": 1.0,
+      "status": "ok",
+      "notes": "labels=5000"
+    },
+    {
+      "experiment": "K-Means",
+      "hardware": "GPU",
+      "train_s": null,
+      "infer_s": null,
+      "classification_s": null,
+      "speedup": null,
+      "status": "unavailable",
+      "notes": "cuML unavailable: No module named 'cuml'"
+    }
+  ],
+  "article_table_md": "| Experimento | Hardware | Treino | Inferencia | Classificacao | Speedup | Status | Notas |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| Autoencoder | CPU | 0.65s | 0.02s | 0.67s | 1.00x | ok | threshold sample=5000 |\n| Autoencoder | GPU | 0.75s | 0.04s | 0.80s | 0.85x | ok | threshold sample=5000 |\n| K-Means | CPU | 1.71s | 0.00s | 1.71s | 1.00x | ok | labels=5000 |\n| K-Means | GPU | n/a | n/a | n/a | n/a | unavailable | cuML unavailable: No module named 'cuml' |"
+}

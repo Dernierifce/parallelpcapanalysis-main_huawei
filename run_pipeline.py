@@ -255,27 +255,87 @@ def run_kmeans_cpu(X: np.ndarray, clusters: int, max_iter: int,
 
 def run_kmeans_gpu(X: np.ndarray, clusters: int, max_iter: int,
                    logger: logging.Logger) -> tuple[float | None, float | None, np.ndarray | None, str]:
-    try:
-        from cuml.cluster import KMeans as CuMLKMeans
-    except ImportError as e:
-        logger.warning(f"  cuML não disponível: {e}")
-        return None, None, None, f"cuML unavailable: {e}"
+    """
+    K-Means GPU implementado em PyTorch puro (sem cuML).
+    Algoritmo Lloyd com operações vetorizadas na GPU via torch.
+    """
+    if not TORCH_AVAILABLE or not torch.cuda.is_available():
+        msg = "CUDA não disponível"
+        logger.warning(f"  {msg}")
+        return None, None, None, msg
 
     logger.info(f"  Clusters  : {clusters}")
     logger.info(f"  Max iter  : {max_iter}")
-    logger.info(f"  Device    : GPU (cuML)")
+    logger.info(f"  Amostras  : {len(X):,}")
+    logger.info(f"  Device    : GPU (PyTorch) — {torch.cuda.get_device_name(0)}")
 
-    model = CuMLKMeans(n_clusters=clusters, max_iter=max_iter, random_state=42)
-    t0 = time.perf_counter()
-    model.fit(X.astype(np.float32))
-    train_s = time.perf_counter() - t0
-    logger.info(f"  Treino    : {train_s:.3f}s")
+    device = "cuda"
+    X_t = torch.from_numpy(X.astype(np.float32)).to(device)
 
-    t1 = time.perf_counter()
-    labels = np.asarray(model.predict(X.astype(np.float32)))
-    infer_s = time.perf_counter() - t1
-    logger.info(f"  Inferência: {infer_s:.3f}s")
-    return train_s, infer_s, labels, "ok"
+    # ── Treino ────────────────────────────────────────────────────────────────
+    torch.cuda.synchronize()
+    t_train = time.perf_counter()
+
+    # Inicialização kmeans++ na GPU
+    rng = torch.Generator(device=device)
+    rng.manual_seed(42)
+    first_idx = torch.randint(0, X_t.shape[0], (1,), generator=rng, device=device).item()
+    centroids = X_t[first_idx].unsqueeze(0)
+
+    for _ in range(1, clusters):
+        dists = torch.cdist(X_t, centroids).min(dim=1).values
+        probs = dists / dists.sum()
+        idx = torch.multinomial(probs, 1, generator=rng).item()
+        centroids = torch.cat([centroids, X_t[idx].unsqueeze(0)], dim=0)
+
+    inertia_history: list[float] = []
+    labels_t = torch.zeros(X_t.shape[0], dtype=torch.long, device=device)
+
+    for iteration in range(max_iter):
+        # Atribuição
+        dists = torch.cdist(X_t, centroids)
+        new_labels = dists.argmin(dim=1)
+
+        # Inércia
+        inertia = dists.min(dim=1).values.pow(2).sum().item()
+        inertia_history.append(inertia)
+
+        # Convergência
+        if iteration > 0 and torch.equal(new_labels, labels_t):
+            logger.info(f"  Convergiu em {iteration + 1} iterações")
+            labels_t = new_labels
+            break
+        labels_t = new_labels
+
+        # Atualização de centroides
+        for k in range(clusters):
+            mask = labels_t == k
+            if mask.any():
+                centroids[k] = X_t[mask].mean(dim=0)
+
+    torch.cuda.synchronize()
+    train_s = time.perf_counter() - t_train
+
+    logger.info(f"  Inércia final     : {inertia_history[-1]:.4f}")
+    logger.info(f"  Iterações reais   : {len(inertia_history)}")
+    logger.info(f"  Treino            : {train_s:.3f}s")
+
+    # ── Inferência ────────────────────────────────────────────────────────────
+    torch.cuda.synchronize()
+    t_infer = time.perf_counter()
+    dists_final = torch.cdist(X_t, centroids)
+    labels_final = dists_final.argmin(dim=1)
+    torch.cuda.synchronize()
+    infer_s = time.perf_counter() - t_infer
+
+    labels_np = labels_final.cpu().numpy()
+
+    unique, counts = np.unique(labels_np, return_counts=True)
+    for c, n in zip(unique, counts):
+        logger.info(f"  Cluster {c:>2}        : {n:,} amostras  ({100*n/len(X):.1f}%)")
+    logger.info(f"  Inferência        : {infer_s:.3f}s")
+
+    return train_s, infer_s, labels_np, "ok (PyTorch GPU)"
 
 
 # ── Benchmark ─────────────────────────────────────────────────────────────────
