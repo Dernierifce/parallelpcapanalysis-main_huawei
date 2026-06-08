@@ -2,7 +2,7 @@
   "arguments": {
     "outdir": "C:\\Users\\dernier.bruno\\parallelpcapanalysis-main_huawei\\data\\results",
     "cache_file": "C:\\Users\\dernier.bruno\\parallelpcapanalysis-main_huawei\\data\\results\\features_cache.pkl",
-    "skip_extraction": true,
+    "skip_extraction": false,
     "sample_size": 5000,
     "ae_epochs": 12,
     "ae_batch_size": 256,
@@ -17,9 +17,9 @@
     {
       "experiment": "Autoencoder",
       "hardware": "CPU",
-      "train_s": 0.6917625998612493,
-      "infer_s": 0.03772050002589822,
-      "classification_s": 0.7294830998871475,
+      "train_s": 0.552709500072524,
+      "infer_s": 0.023473199922591448,
+      "classification_s": 0.5761826999951154,
       "speedup": 1.0,
       "status": "ok",
       "notes": "samples=5000 | epochs=12"
@@ -27,19 +27,19 @@
     {
       "experiment": "Autoencoder",
       "hardware": "GPU",
-      "train_s": 0.795527899870649,
-      "infer_s": 0.04719220008701086,
-      "classification_s": 0.8427200999576598,
-      "speedup": 0.8656291690726238,
+      "train_s": 0.7335828000213951,
+      "infer_s": 0.042047099908813834,
+      "classification_s": 0.7756298999302089,
+      "speedup": 0.7428577728204653,
       "status": "ok",
       "notes": "samples=5000 | epochs=12"
     },
     {
       "experiment": "K-Means",
       "hardware": "CPU",
-      "train_s": 1.4343075999058783,
-      "infer_s": 0.00048010004684329033,
-      "classification_s": 1.4347876999527216,
+      "train_s": 2.4373433999717236,
+      "infer_s": 0.0003573999274522066,
+      "classification_s": 2.4377007998991758,
       "speedup": 1.0,
       "status": "ok",
       "notes": "labels=5000 | clusters=8"
@@ -47,10 +47,10 @@
     {
       "experiment": "K-Means",
       "hardware": "GPU",
-      "train_s": 0.14222460007295012,
-      "infer_s": 0.00038590002804994583,
-      "classification_s": 0.14261050010100007,
-      "speedup": 10.06088400879719,
+      "train_s": 0.14413470006547868,
+      "infer_s": 0.0006051999516785145,
+      "classification_s": 0.1447399000171572,
+      "speedup": 16.841940609398065,
       "status": "ok",
       "notes": "labels=5000 | clusters=8"
     }
