@@ -30,6 +30,16 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
 try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.gridspec as gridspec
+    import matplotlib.patches as mpatches
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+
+try:
     import torch
     import torch.nn as nn
     from torch.utils.data import DataLoader, TensorDataset
@@ -503,6 +513,405 @@ def write_results(rows: list[dict], args: argparse.Namespace,
     logger.info(f"JSON salvo em : {json_path}")
 
 
+
+# ── Geração de relatório visual ───────────────────────────────────────────────
+
+def _parse_log(log_path: Path) -> dict:
+    """Extrai dados estruturados do pipeline.log."""
+    data: dict = {
+        "meta": {},
+        "shards": [],
+        "ae_epochs": [],
+        "ae_loss": [],
+        "ae_cpu": {},
+        "ae_gpu": {},
+        "km_cpu": {"clusters": {}},
+        "km_gpu": {"clusters": {}},
+        "bench_rows": [],
+        "total_min": None,
+        "cuda": "False",
+        "gpu_name": "",
+    }
+    if not log_path.exists():
+        return data
+
+    lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    current_shard: dict | None = None
+    current_sub = ""   # ae_cpu | ae_gpu | km_cpu | km_gpu
+
+    def store(key: str, field: str, val):
+        data[key][field] = val
+
+    for line in lines:
+        msg = line.split(" | ", 2)[-1].strip() if " | " in line else line.strip()
+
+        # ── Meta ──────────────────────────────────────────────────────────────
+        if msg.startswith("CUDA        :"):
+            data["cuda"] = msg.split(":", 1)[1].strip()
+        elif msg.startswith("PyTorch     :"):
+            data["meta"]["pytorch"] = msg.split(":", 1)[1].strip()
+        elif msg.startswith("Python      :"):
+            data["meta"]["python"] = msg.split(":", 1)[1].strip()
+        elif msg.startswith("Sample size :"):
+            data["meta"]["sample_size"] = msg.split(":", 1)[1].strip()
+        elif "Device    : GPU (PyTorch)" in msg and "─" in msg:
+            data["gpu_name"] = msg.split("─", 1)[1].strip(" ─")
+
+        # ── Shards ────────────────────────────────────────────────────────────
+        elif msg.startswith("[Shard "):
+            current_shard = {}
+        elif current_shard is not None:
+            if msg.startswith("Arquivo     :"):
+                current_shard["name"] = msg.split(":", 1)[1].strip()
+            elif msg.startswith("Tamanho     :"):
+                try:
+                    current_shard["size_mb"] = float(
+                        msg.split(":", 1)[1].strip().replace(",", "").replace(" MB", ""))
+                except Exception: pass
+            elif msg.startswith("Fluxos      :"):
+                try:
+                    current_shard["flows"] = int(msg.split(":", 1)[1].strip().replace(",", ""))
+                except Exception: pass
+            elif msg.startswith("Tempo       :") and "(" in msg:
+                try:
+                    current_shard["time_min"] = float(msg.split("(")[1].split(" min")[0])
+                    data["shards"].append(dict(current_shard))
+                    current_shard = None
+                except Exception: pass
+
+        # ── Subsection markers ────────────────────────────────────────────────
+        if "Autoencoder / CPU" in msg:
+            current_sub = "ae_cpu"
+        elif "Autoencoder / GPU" in msg:
+            current_sub = "ae_gpu"
+        elif "K-Means / CPU" in msg:
+            current_sub = "km_cpu"
+        elif "K-Means / GPU" in msg:
+            current_sub = "km_gpu"
+
+        # ── Autoencoder epochs ────────────────────────────────────────────────
+        if "[Autoencoder] Época" in msg:
+            try:
+                parts = msg.split("|")
+                epoch_part = parts[0].strip().split()[-1].split("/")[0]
+                loss_part  = parts[1].strip().split("=")[1]
+                data["ae_epochs"].append(int(epoch_part))
+                data["ae_loss"].append(float(loss_part))
+            except Exception: pass
+
+        # ── Treino ────────────────────────────────────────────────────────────
+        if "Treino" in msg and ":" in msg and current_sub:
+            try:
+                val_str = msg.split(":")[-1].strip().replace("s", "").strip()
+                val = float(val_str)
+                data[current_sub]["train_s"] = val
+            except Exception: pass
+
+        # ── Inferência ────────────────────────────────────────────────────────
+        if "Inferência" in msg and ":" in msg and current_sub:
+            try:
+                val_str = msg.split(":")[-1].strip().replace("s", "").strip()
+                val = float(val_str)
+                data[current_sub]["infer_s"] = val
+            except Exception: pass
+
+        # ── Clusters ──────────────────────────────────────────────────────────
+        if "Cluster" in msg and "amostras" in msg and current_sub in ("km_cpu","km_gpu"):
+            try:
+                parts = msg.split(":")
+                cluster_id = int(parts[0].strip().split()[-1])
+                count = int(parts[1].strip().split()[0].replace(",", ""))
+                pct   = float(parts[1].strip().split("(")[1].replace("%)", ""))
+                data[current_sub]["clusters"][cluster_id] = {"count": count, "pct": pct}
+            except Exception: pass
+
+        # ── Inércia ───────────────────────────────────────────────────────────
+        if "Inércia final" in msg and current_sub in ("km_cpu","km_gpu"):
+            try:
+                data[current_sub]["inertia"] = float(msg.split(":")[-1].strip())
+            except Exception: pass
+
+        # ── Iterações ─────────────────────────────────────────────────────────
+        if ("Iterações reais" in msg or "Convergiu em" in msg) and current_sub in ("km_cpu","km_gpu"):
+            try:
+                if "Convergiu em" in msg:
+                    val = int(msg.split("Convergiu em")[1].split("iter")[0].strip())
+                else:
+                    val = int(msg.split(":")[-1].strip())
+                data[current_sub]["n_iter"] = val
+            except Exception: pass
+
+        # ── Speedup ───────────────────────────────────────────────────────────
+        if "Speedup GPU vs CPU" in msg and current_sub in ("ae_gpu","km_gpu"):
+            try:
+                data[current_sub]["speedup"] = float(msg.split(":")[-1].strip().replace("x",""))
+            except Exception: pass
+
+        # ── Tempo total ───────────────────────────────────────────────────────
+        if msg.startswith("Tempo total  :") and "min" in msg:
+            try:
+                data["total_min"] = float(msg.split("(")[1].split(" min")[0])
+            except Exception: pass
+
+    return data
+
+
+def plot_report(log_path: Path, out_path: Path, logger: logging.Logger) -> None:
+    if not MATPLOTLIB_AVAILABLE:
+        logger.warning("matplotlib não disponível — relatório visual não gerado.")
+        return
+
+    logger.info("Gerando relatório visual...")
+    d = _parse_log(log_path)
+
+    # ── Paleta ───────────────────────────────────────────────────────────────
+    DARK   = "#0f172a"; PANEL  = "#1e293b"; GRID   = "#334155"
+    TEXT   = "#f1f5f9"; MUTED  = "#94a3b8"
+    BLUE   = "#3b82f6"; GREEN  = "#22c55e"; AMBER  = "#f59e0b"
+    PURPLE = "#a855f7"; RED    = "#ef4444"; CYAN   = "#06b6d4"
+    SHARD_COLORS = [BLUE, GREEN, AMBER, PURPLE]
+
+    fig = plt.figure(figsize=(20, 28), facecolor=DARK)
+    fig.patch.set_facecolor(DARK)
+    gs  = gridspec.GridSpec(5, 2, figure=fig, hspace=0.55, wspace=0.35,
+                            top=0.95, bottom=0.04, left=0.07, right=0.96)
+
+    def style(ax, title):
+        ax.set_facecolor(PANEL)
+        for sp in ax.spines.values(): sp.set_edgecolor(GRID)
+        ax.tick_params(colors=MUTED, labelsize=9)
+        ax.set_title(title, color=TEXT, fontsize=11, fontweight="bold", pad=10)
+        ax.grid(axis="y", color=GRID, linestyle="--", linewidth=0.6, alpha=0.6)
+
+    cuda_ok  = d["cuda"].lower() == "true"
+    gpu_label = d["gpu_name"] or ("RTX 4060" if cuda_ok else "N/A")
+    pytorch  = d["meta"].get("pytorch", "N/A")
+    python   = d["meta"].get("python",  "N/A")
+    total_m  = f"{d['total_min']:.1f} min" if d["total_min"] else "N/A"
+    ts_str   = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # ── 0. Header ─────────────────────────────────────────────────────────────
+    ax0 = fig.add_subplot(gs[0, :])
+    ax0.set_facecolor(PANEL)
+    for sp in ax0.spines.values(): sp.set_edgecolor(BLUE)
+    ax0.set_xticks([]); ax0.set_yticks([])
+    ax0.text(0.5, 0.72, "Parallel PCAP Analysis — Relatório de Execução",
+             transform=ax0.transAxes, ha="center", color=TEXT,
+             fontsize=16, fontweight="bold")
+    subtitle = (f"Gerado: {ts_str}  |  Duração total: {total_m}  |  "
+                f"Python {python}  |  PyTorch {pytorch}  |  "
+                f"CUDA: {d['cuda']}  |  GPU: {gpu_label}")
+    ax0.text(0.5, 0.30, subtitle, transform=ax0.transAxes,
+             ha="center", color=MUTED, fontsize=9.5)
+
+    # ── 1. Tempo de extração por shard ────────────────────────────────────────
+    ax1 = fig.add_subplot(gs[1, 0])
+    style(ax1, "Extração — Tempo por Shard (min)")
+    if d["shards"]:
+        names  = [s["name"].replace("shard__","S").split("_")[0][:10] for s in d["shards"]]
+        times  = [s.get("time_min", 0) for s in d["shards"]]
+        colors = SHARD_COLORS[:len(names)]
+        bars = ax1.bar(names, times, color=colors, edgecolor=DARK, linewidth=1, width=0.55)
+        for bar, t in zip(bars, times):
+            ax1.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.4,
+                     f"{t:.1f}m", ha="center", color=TEXT, fontsize=9, fontweight="bold")
+    ax1.set_ylabel("Minutos", color=MUTED, fontsize=9)
+    ax1.tick_params(axis="x", colors=TEXT, labelsize=8)
+
+    # ── 2. Fluxos por shard ───────────────────────────────────────────────────
+    ax2 = fig.add_subplot(gs[1, 1])
+    style(ax2, "Extração — Fluxos Extraídos por Shard")
+    if d["shards"]:
+        flows  = [s.get("flows", 0) for s in d["shards"]]
+        bars2  = ax2.bar(names, flows, color=colors, edgecolor=DARK, linewidth=1, width=0.55)
+        for bar, f in zip(bars2, flows):
+            ax2.text(bar.get_x()+bar.get_width()/2, bar.get_height()+200,
+                     f"{f:,}", ha="center", color=TEXT, fontsize=9, fontweight="bold")
+        total_f = sum(flows)
+        ax2.text(0.98, 0.95, f"Total: {total_f:,}", transform=ax2.transAxes,
+                 ha="right", color=AMBER, fontsize=10, fontweight="bold")
+    ax2.set_ylabel("Nº de Fluxos", color=MUTED, fontsize=9)
+    ax2.tick_params(axis="x", colors=TEXT, labelsize=8)
+
+    # ── 3. Convergência Autoencoder ───────────────────────────────────────────
+    ax3 = fig.add_subplot(gs[2, 0])
+    style(ax3, "Autoencoder — Convergência Loss por Época")
+    if d["ae_epochs"] and d["ae_loss"]:
+        ax3.plot(d["ae_epochs"], d["ae_loss"], color=BLUE, linewidth=2.5,
+                 marker="o", markersize=6, markerfacecolor=TEXT,
+                 markeredgecolor=BLUE, zorder=3)
+        ax3.fill_between(d["ae_epochs"], d["ae_loss"], alpha=0.15, color=BLUE)
+        for e, l in zip(d["ae_epochs"], d["ae_loss"]):
+            ax3.annotate(f"{l:.3f}", (e, l), textcoords="offset points",
+                         xytext=(0, 8), ha="center", color=MUTED, fontsize=7.5)
+        cpu_t = d["ae_cpu"].get("train_s", 0)
+        cpu_i = d["ae_cpu"].get("infer_s", 0)
+        gpu_t = d["ae_gpu"].get("train_s")
+        sp    = d["ae_gpu"].get("speedup")
+        info  = f"CPU treino: {cpu_t:.3f}s\nCPU infer: {cpu_i:.3f}s"
+        if gpu_t:
+            info += f"\nGPU treino: {gpu_t:.3f}s"
+        if sp:
+            info += f"\nSpeedup: {sp:.2f}x"
+        ax3.text(0.97, 0.92, info, transform=ax3.transAxes, ha="right",
+                 color=GREEN, fontsize=8.5, fontweight="bold",
+                 bbox=dict(boxstyle="round,pad=0.3", facecolor=DARK,
+                           edgecolor=GREEN, alpha=0.85))
+    ax3.set_xlabel("Época", color=MUTED, fontsize=9)
+    ax3.set_ylabel("MSE Loss", color=MUTED, fontsize=9)
+    if d["ae_epochs"]:
+        ax3.set_xticks(d["ae_epochs"])
+    ax3.tick_params(axis="x", colors=TEXT)
+
+    # ── 4. K-Means distribuição CPU vs GPU ────────────────────────────────────
+    ax4 = fig.add_subplot(gs[2, 1])
+    style(ax4, "K-Means — Distribuição de Clusters")
+    cpu_cl = d["km_cpu"].get("clusters", {})
+    gpu_cl = d["km_gpu"].get("clusters", {})
+    cluster_ids = sorted(set(list(cpu_cl.keys()) + list(gpu_cl.keys())))
+    if cluster_ids:
+        x = np.arange(len(cluster_ids))
+        w = 0.38 if gpu_cl else 0.6
+        cpu_counts = [cpu_cl.get(c, {}).get("count", 0) for c in cluster_ids]
+        bars_cpu = ax4.bar(x - (w/2 if gpu_cl else 0), cpu_counts,
+                           width=w, color=BLUE, edgecolor=DARK, linewidth=1,
+                           label="CPU")
+        if gpu_cl:
+            gpu_counts = [gpu_cl.get(c, {}).get("count", 0) for c in cluster_ids]
+            ax4.bar(x + w/2, gpu_counts, width=w, color=GREEN,
+                    edgecolor=DARK, linewidth=1, label="GPU")
+            ax4.legend(facecolor=PANEL, edgecolor=GRID,
+                       labelcolor=TEXT, fontsize=8)
+        ax4.set_xticks(x)
+        ax4.set_xticklabels([f"C{c}" for c in cluster_ids], color=TEXT, fontsize=8)
+        inertia = d["km_cpu"].get("inertia")
+        n_iter  = d["km_cpu"].get("n_iter")
+        km_t    = d["km_cpu"].get("train_s", 0)
+        gkm_t   = d["km_gpu"].get("train_s")
+        gkm_sp  = d["km_gpu"].get("speedup")
+        info = f"Inércia: {inertia:.2f}\n" if inertia else ""
+        info += f"Iter: {n_iter}\n" if n_iter else ""
+        info += f"CPU: {km_t:.3f}s"
+        if gkm_t:  info += f"\nGPU: {gkm_t:.3f}s"
+        if gkm_sp: info += f"\nSpeedup: {gkm_sp:.2f}x"
+        ax4.text(0.97, 0.92, info, transform=ax4.transAxes, ha="right",
+                 color=AMBER, fontsize=8.5, fontweight="bold",
+                 bbox=dict(boxstyle="round,pad=0.3", facecolor=DARK,
+                           edgecolor=AMBER, alpha=0.85))
+    ax4.set_ylabel("Amostras", color=MUTED, fontsize=9)
+
+    # ── 5. Tabela comparativa ─────────────────────────────────────────────────
+    ax5 = fig.add_subplot(gs[3, :])
+    ax5.set_facecolor(PANEL)
+    for sp in ax5.spines.values(): sp.set_edgecolor(GRID)
+    ax5.set_xticks([]); ax5.set_yticks([])
+    ax5.set_title("Comparativo de Métodos — CPU vs GPU", color=TEXT,
+                  fontsize=11, fontweight="bold", pad=10)
+
+    def fv(v): return f"{v:.3f}s" if isinstance(v, (int, float)) else "—"
+    def sp_str(v): return f"{v:.2f}x" if isinstance(v, (int, float)) else "—"
+
+    ae_cpu_total = (d["ae_cpu"].get("train_s",0) or 0) + (d["ae_cpu"].get("infer_s",0) or 0)
+    ae_gpu_total = (d["ae_gpu"].get("train_s",0) or 0) + (d["ae_gpu"].get("infer_s",0) or 0)
+    km_cpu_total = (d["km_cpu"].get("train_s",0) or 0) + (d["km_cpu"].get("infer_s",0) or 0)
+    km_gpu_total = (d["km_gpu"].get("train_s",0) or 0) + (d["km_gpu"].get("infer_s",0) or 0)
+    ae_sp = ae_cpu_total / ae_gpu_total if ae_gpu_total > 0 else None
+    km_sp = km_cpu_total / km_gpu_total if km_gpu_total > 0 else None
+
+    table_rows = [
+        ["Autoencoder", "CPU",
+         fv(d["ae_cpu"].get("train_s")), fv(d["ae_cpu"].get("infer_s")),
+         fv(ae_cpu_total or None), "1.00x", "✓ ok"],
+        ["Autoencoder", "GPU",
+         fv(d["ae_gpu"].get("train_s")), fv(d["ae_gpu"].get("infer_s")),
+         fv(ae_gpu_total or None), sp_str(ae_sp),
+         "✓ ok" if d["ae_gpu"].get("train_s") else "⊘ skipped"],
+        ["K-Means", "CPU",
+         fv(d["km_cpu"].get("train_s")), fv(d["km_cpu"].get("infer_s")),
+         fv(km_cpu_total or None), "1.00x", "✓ ok"],
+        ["K-Means", "GPU",
+         fv(d["km_gpu"].get("train_s")), fv(d["km_gpu"].get("infer_s")),
+         fv(km_gpu_total or None), sp_str(km_sp),
+         "✓ ok" if d["km_gpu"].get("train_s") else "⊘ skipped"],
+    ]
+    col_hdrs = ["Experimento", "Hardware", "Treino", "Inferência", "Total", "Speedup", "Status"]
+    col_x    = [0.01, 0.16, 0.27, 0.38, 0.50, 0.61, 0.72]
+
+    for cx, h in zip(col_x, col_hdrs):
+        ax5.text(cx, 0.88, h, transform=ax5.transAxes,
+                 color=BLUE, fontsize=9.5, fontweight="bold", va="top")
+    line = plt.Line2D([0.01,0.99],[0.78,0.78], transform=ax5.transAxes,
+                      color=GRID, linewidth=1)
+    ax5.add_line(line)
+
+    row_ys = [0.62, 0.44, 0.26, 0.08]
+    for ri, (row, ry) in enumerate(zip(table_rows, row_ys)):
+        bg = "#243044" if ri % 2 else "#1e293b"
+        rect = mpatches.FancyBboxPatch((0.005, ry-0.09), 0.99, 0.18,
+                                        boxstyle="round,pad=0.01",
+                                        facecolor=bg, edgecolor=GRID,
+                                        linewidth=0.5,
+                                        transform=ax5.transAxes, clip_on=False)
+        ax5.add_patch(rect)
+        for ci, (val, cx) in enumerate(zip(row, col_x)):
+            color = TEXT
+            if ci == 1: color = GREEN if val == "CPU" else PURPLE
+            elif ci == 5: color = CYAN if val not in ("—", "1.00x") else MUTED
+            elif ci == 6: color = GREEN if "ok" in val else RED
+            ax5.text(cx, ry, val, transform=ax5.transAxes,
+                     color=color, fontsize=9, va="center")
+
+    # ── 6. Timeline ───────────────────────────────────────────────────────────
+    ax6 = fig.add_subplot(gs[4, :])
+    ax6.set_facecolor(PANEL)
+    for sp in ax6.spines.values(): sp.set_edgecolor(GRID)
+    ax6.set_title("Timeline de Execução do Pipeline (minutos)", color=TEXT,
+                  fontsize=11, fontweight="bold", pad=10)
+
+    if d["shards"]:
+        timeline: list[tuple] = []
+        cur = 0.0
+        colors_t = SHARD_COLORS[:len(d["shards"])]
+        for s, c in zip(d["shards"], colors_t):
+            dur = s.get("time_min", 0)
+            name = s["name"].split("__")[1][:10] if "__" in s.get("name","") else s.get("name","")[:10]
+            timeline.append((name, cur, dur, c))
+            cur += dur
+        # Autoencoder + KMeans (segundos → minutos)
+        ae_bench = (ae_cpu_total + ae_gpu_total) / 60
+        km_bench = (km_cpu_total + km_gpu_total) / 60
+        if ae_bench > 0:
+            timeline.append(("AE bench", cur, max(ae_bench, 0.05), CYAN))
+            cur += max(ae_bench, 0.05)
+        if km_bench > 0:
+            timeline.append(("KM bench", cur, max(km_bench, 0.05), RED))
+
+        total_t = sum(t[2] for t in timeline)
+        for label, start, dur, col in timeline:
+            ax6.barh(0, dur, left=start, color=col, edgecolor=DARK,
+                     linewidth=0.8, height=0.5)
+            if dur > total_t * 0.04:
+                ax6.text(start+dur/2, 0, f"{label}\n{dur:.1f}m",
+                         ha="center", va="center", color=DARK,
+                         fontsize=8.5, fontweight="bold")
+            else:
+                ax6.text(start+dur+total_t*0.005, 0.32, label,
+                         ha="left", color=col, fontsize=7.5)
+        ax6.set_xlim(0, total_t * 1.06)
+        ax6.text(0.99, 0.88, f"Total: {total_t:.1f} min",
+                 transform=ax6.transAxes, ha="right",
+                 color=AMBER, fontsize=10, fontweight="bold")
+
+    ax6.set_ylim(-0.5, 0.8); ax6.set_yticks([])
+    ax6.set_xlabel("Tempo acumulado (minutos)", color=MUTED, fontsize=9)
+    ax6.tick_params(axis="x", colors=MUTED)
+    ax6.grid(axis="x", color=GRID, linestyle="--", linewidth=0.6, alpha=0.5)
+
+    plt.savefig(out_path, dpi=160, bbox_inches="tight", facecolor=DARK)
+    plt.close(fig)
+    logger.info(f"Relatório visual salvo em : {out_path}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -575,6 +984,9 @@ def main() -> None:
 
     # ── Resultados ────────────────────────────────────────────────────────────
     write_results(rows, args, outdir, logger)
+
+    # ── Relatório visual ──────────────────────────────────────────────────────
+    plot_report(log_path, outdir / "pipeline_report.png", logger)
 
     # ── Encerramento ──────────────────────────────────────────────────────────
     total_elapsed = time.perf_counter() - run_start
