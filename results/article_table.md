@@ -1,6 +1,0 @@
-| Experimento | Hardware | Treino | Inferencia | Classificacao | Speedup | Status | Notas |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Autoencoder | CPU | 0.57s | 0.02s | 0.59s | 1.00x | ok | threshold sample=5000 |
-| Autoencoder | GPU | 0.72s | 0.04s | 0.76s | 0.78x | ok | threshold sample=5000 |
-| K-Means | CPU | 2.36s | 0.00s | 2.36s | 1.00x | ok | labels=5000 |
-| K-Means | GPU | n/a | n/a | n/a | n/a | unavailable | cuML unavailable: No module named 'cuml' |
