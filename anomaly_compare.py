@@ -3,7 +3,7 @@ anomaly_compare.py
 ══════════════════════════════════════════════════════════════════════════════
 Comparativo unificado de detecção de anomalias em tráfego de rede.
 Executa Autoencoder e K-Means em CPU e GPU, mede qualidade e desempenho,
-e gera relatório completo (log + PNG + JSON + CSV).
+e gera relatorio completo (TXT detalhado + PNG resumido).
 
 Métricas de qualidade (não supervisionadas):
   • Anomaly Rate          — % de fluxos classificados como anômalos
@@ -28,8 +28,6 @@ Dependências:
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 import logging
 import os
 import pickle
@@ -53,7 +51,6 @@ try:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import matplotlib.gridspec as gridspec
-    import matplotlib.patches as mpatches
     MATPLOTLIB_OK = True
 except ImportError:
     MATPLOTLIB_OK = False
@@ -87,7 +84,7 @@ def setup_logger(log_path: Path) -> logging.Logger:
         log.handlers.clear()
     fmt = logging.Formatter("%(asctime)s | %(levelname)-8s | %(message)s",
                             datefmt="%Y-%m-%d %H:%M:%S")
-    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh = logging.FileHandler(log_path, mode="w", encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(fmt)
     ch = logging.StreamHandler(sys.stdout)
@@ -531,287 +528,233 @@ def run_kmeans_gpu(X_train: np.ndarray, X_test: np.ndarray, k: int,
 # RELATÓRIO VISUAL
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _fmt(v, digits: int = 4) -> str:
+    if isinstance(v, float):
+        return f"{v:.{digits}f}"
+    if isinstance(v, int):
+        return f"{v:,}"
+    if v is None:
+        return "N/A"
+    return str(v)
+
+
+def write_text_report(results: dict, txt_path: Path, args: argparse.Namespace,
+                      total_s: float, log: logging.Logger) -> None:
+    """Append a human-readable final report to anomaly_compare.txt."""
+    lines: list[str] = []
+    lines.append("")
+    lines.append("=" * 78)
+    lines.append("RELATORIO DETALHADO DA EXECUCAO")
+    lines.append("=" * 78)
+    lines.append("")
+    lines.append("Objetivo")
+    lines.append("  Comparar Autoencoder e K-Means para deteccao nao supervisionada")
+    lines.append("  de anomalias em fluxos de rede, medindo qualidade e desempenho")
+    lines.append("  em CPU e, quando habilitado, GPU.")
+    lines.append("")
+    lines.append("Parametros essenciais")
+    lines.append(f"  Diretorio de saida : {args.outdir}")
+    lines.append(f"  Cache de features  : {args.cache_file}")
+    lines.append(f"  Pular extracao     : {args.skip_extraction}")
+    lines.append(f"  GPU habilitada     : {args.gpu}")
+    lines.append(f"  Amostras usadas    : {args.sample_size if args.sample_size > 0 else 'todas'}")
+    lines.append(f"  Fracao de teste    : {args.test_size:.2f}")
+    lines.append(f"  Epocas AE          : {args.ae_epochs}")
+    lines.append(f"  K-Means clusters   : {args.kmeans_clusters}")
+    lines.append("")
+    lines.append("Etapas executadas")
+    lines.append("  1. Extracao/cache: quando --skip-extraction nao e usado, os PCAPs")
+    lines.append("     em data/pcaps sao transformados em features numericas e salvos")
+    lines.append("     em features_cache.pkl. Com --skip-extraction, o cache existente")
+    lines.append("     e carregado diretamente.")
+    lines.append("  2. Normalizacao e amostragem: as features escaladas sao carregadas")
+    lines.append("     do cache; se --sample-size for maior que zero, uma amostra")
+    lines.append("     reprodutivel com seed 42 e selecionada.")
+    lines.append("  3. Divisao treino/teste: os dados sao separados com random_state=42.")
+    lines.append("     O treino aprende o comportamento normal; o teste mede a deteccao")
+    lines.append("     em dados nao vistos.")
+    lines.append("  4. Autoencoder: treina uma rede neural para reconstruir os fluxos.")
+    lines.append("     Erros de reconstrucao maiores indicam maior suspeita de anomalia.")
+    lines.append("  5. K-Means: agrupa os fluxos e usa a distancia ao centroide mais")
+    lines.append("     proximo como score de anomalia.")
+    lines.append("  6. Threshold: o percentil 95 e calculado somente no treino para")
+    lines.append("     reduzir data leakage. A contagem final de anomalias usa o teste.")
+    lines.append("  7. Relatorio visual: anomaly_report.png mostra apenas parametros")
+    lines.append("     essenciais, tempo total, taxa de anomalia e quantidade detectada.")
+    lines.append("")
+    lines.append("Resumo por metodo")
+    lines.append("  Metodo     HW   Status      Treino(s) Infer(s) Total(s) Anomalias Anom%  Threshold")
+    lines.append("  " + "-" * 86)
+
+    for name in ["AE-CPU", "AE-GPU", "KM-CPU", "KM-GPU"]:
+        res = results.get(name, {})
+        status = res.get("status", "nao executado")
+        hw = "GPU" if res.get("device") in ("cuda", "gpu") else "CPU"
+        if status != "ok":
+            lines.append(f"  {name:<9} {hw:<4} {status:<10} {res.get('notes', '')}")
+            continue
+        lines.append(
+            f"  {name:<9} {hw:<4} {status:<10} "
+            f"{_fmt(res.get('train_s'), 3):>8} "
+            f"{_fmt(res.get('infer_s'), 3):>8} "
+            f"{_fmt(res.get('total_s'), 3):>8} "
+            f"{_fmt(res.get('n_anomalies')):>9} "
+            f"{_fmt(res.get('anomaly_rate'), 2):>6}% "
+            f"{_fmt(res.get('threshold_p95'), 6):>10}"
+        )
+
+    lines.append("")
+    lines.append("Detalhes por metodo")
+    for name in ["AE-CPU", "AE-GPU", "KM-CPU", "KM-GPU"]:
+        res = results.get(name, {})
+        lines.append("")
+        lines.append(f"[{name}]")
+        lines.append(f"  Status: {res.get('status', 'nao executado')}")
+        if res.get("notes"):
+            lines.append(f"  Observacoes: {res.get('notes')}")
+        if res.get("status") != "ok":
+            continue
+        lines.append(f"  Treino/Teste: {res.get('n_train', 'N/A')} / {res.get('n_test', 'N/A')}")
+        lines.append(f"  Tempo de treino: {_fmt(res.get('train_s'), 3)}s")
+        lines.append(f"  Tempo de inferencia: {_fmt(res.get('infer_s'), 3)}s")
+        lines.append(f"  Tempo total: {_fmt(res.get('total_s'), 3)}s")
+        lines.append(f"  Threshold p95 do treino: {_fmt(res.get('threshold_p95'), 6)}")
+        lines.append(f"  Anomalias no teste: {_fmt(res.get('n_anomalies'))} ({_fmt(res.get('anomaly_rate'), 2)}%)")
+        if "final_loss" in res:
+            lines.append(f"  Loss final do Autoencoder: {_fmt(res.get('final_loss'), 6)}")
+        if "train_final_loss" in res:
+            lines.append(f"  Erro medio no treino: {_fmt(res.get('train_final_loss'), 6)}")
+        if "inertia" in res:
+            lines.append(f"  Inercia K-Means: {_fmt(res.get('inertia'), 4)}")
+        quality = res.get("quality", {})
+        if quality:
+            lines.append(f"  Silhouette: {_fmt(quality.get('silhouette'), 4)}")
+            lines.append(f"  Clusters suspeitos: {quality.get('suspicious_clusters', [])}")
+            lines.append(f"  Fluxos em clusters suspeitos: {_fmt(quality.get('n_suspicious_flows'))}")
+        score_dist = res.get("score_dist", {})
+        if score_dist:
+            lines.append("  Distribuicao dos scores:")
+            for key in ["mean", "std", "min", "max", "p50", "p75", "p90", "p95", "p99"]:
+                if key in score_dist:
+                    lines.append(f"    {key:<4}: {_fmt(score_dist.get(key), 6)}")
+        threshold_analysis = res.get("threshold_analysis", {})
+        if threshold_analysis:
+            lines.append("  Analise por percentil:")
+            for pct, data in threshold_analysis.items():
+                lines.append(
+                    f"    {pct}: threshold={_fmt(data.get('threshold'), 6)}, "
+                    f"anomalias={_fmt(data.get('n_anomalies'))}, "
+                    f"taxa={_fmt(data.get('anomaly_rate_pct'), 2)}%"
+                )
+
+    lines.append("")
+    lines.append(f"Tempo total da execucao: {total_s:.2f}s ({total_s/60:.1f} min)")
+    lines.append("Arquivos gerados")
+    lines.append(f"  TXT detalhado : {txt_path}")
+    lines.append(f"  PNG visual    : {Path(args.outdir) / 'anomaly_report.png'}")
+    lines.append("")
+
+    with open(txt_path, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    log.info(f"Relatorio detalhado TXT salvo em : {txt_path}")
+
+
 def plot_report(results: dict, out_path: Path, args: argparse.Namespace,
                 log: logging.Logger) -> None:
     if not MATPLOTLIB_OK:
-        log.warning("matplotlib indisponível — relatório visual não gerado")
+        log.warning("matplotlib indisponivel - relatorio visual nao gerado")
         return
 
-    DARK  = "#0D1B2A"; PANEL = "#1B2A3B"; GRID  = "#263445"
-    TEXT  = "#F0F4F8"; MUTED = "#7B92A8"
-    BLUE  = "#1C7293"; TEAL  = "#028090"; MINT  = "#02C39A"
-    AMBER = "#F59E0B"; RED   = "#EF4444"; PURPLE= "#7C3AED"
+    BG = "#FFFFFF"
+    TEXT = "#111827"
+    MUTED = "#4B5563"
+    GRID = "#D1D5DB"
+    BLUE = "#2563EB"
+    GREEN = "#059669"
+    ORANGE = "#D97706"
+    RED = "#DC2626"
+    COLORS = {"AE-CPU": BLUE, "AE-GPU": GREEN, "KM-CPU": ORANGE, "KM-GPU": RED}
 
-    fig = plt.figure(figsize=(22, 26), facecolor=DARK)
-    gs  = gridspec.GridSpec(5, 2, figure=fig, hspace=0.52, wspace=0.32,
-                            top=0.95, bottom=0.04, left=0.07, right=0.96)
+    fig = plt.figure(figsize=(14, 9), facecolor=BG)
+    gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.35, wspace=0.28,
+                           top=0.84, bottom=0.08, left=0.08, right=0.96)
+    fig.suptitle("Deteccao de Anomalias - Resumo Essencial",
+                 fontsize=18, fontweight="bold", color=TEXT, y=0.96)
+    fig.text(
+        0.5, 0.91,
+        f"amostras={args.sample_size if args.sample_size > 0 else 'todas'} | "
+        f"teste={args.test_size:.0%} | AE epocas={args.ae_epochs} | "
+        f"K-Means k={args.kmeans_clusters} | GPU={'sim' if args.gpu else 'nao'}",
+        ha="center", fontsize=11, color=MUTED,
+    )
 
-    def style(ax, title):
-        ax.set_facecolor(PANEL)
-        for sp in ax.spines.values(): sp.set_edgecolor(GRID)
-        ax.tick_params(colors=MUTED, labelsize=9)
-        ax.set_title(title, color=TEXT, fontsize=11, fontweight="bold", pad=10)
-        ax.grid(axis="y", color=GRID, linestyle="--", linewidth=0.6, alpha=0.7)
+    def style(ax, title: str) -> None:
+        ax.set_facecolor(BG)
+        ax.set_title(title, fontsize=12, fontweight="bold", color=TEXT, pad=10)
+        ax.grid(axis="y", color=GRID, linestyle="--", linewidth=0.8, alpha=0.8)
+        ax.tick_params(colors=TEXT, labelsize=10)
+        for sp in ax.spines.values():
+            sp.set_color(GRID)
 
-    gpu_ok  = TORCH_OK and torch.cuda.is_available()
-    gpu_lbl = torch.cuda.get_device_name(0) if gpu_ok else "N/A"
+    ok_items = [(name, results.get(name, {})) for name in ["AE-CPU", "AE-GPU", "KM-CPU", "KM-GPU"]
+                if results.get(name, {}).get("status") == "ok"]
+    names = [name for name, _ in ok_items]
 
-    # ── 0. Header ─────────────────────────────────────────────────────────────
-    ax0 = fig.add_subplot(gs[0, :])
-    ax0.set_facecolor(PANEL)
-    for sp in ax0.spines.values(): sp.set_edgecolor(TEAL)
-    ax0.set_xticks([]); ax0.set_yticks([])
-    ax0.text(0.5, 0.74, "Parallel PCAP — Detecção de Anomalias CPU vs GPU",
-             transform=ax0.transAxes, ha="center", color=TEXT,
-             fontsize=17, fontweight="bold")
-    ax0.text(0.5, 0.30,
-             f"Gerado: {datetime.now():%Y-%m-%d %H:%M}  |  "
-             f"Amostras: {args.sample_size:,}  |  "
-             f"AE épocas: {args.ae_epochs}  |  "
-             f"K-Means k={args.kmeans_clusters}  |  "
-             f"GPU: {gpu_lbl}",
-             transform=ax0.transAxes, ha="center", color=MUTED, fontsize=10)
+    ax1 = fig.add_subplot(gs[0, 0])
+    style(ax1, "Tempo total por metodo (s)")
+    totals = [res.get("total_s", 0) for _, res in ok_items]
+    if totals:
+        bars = ax1.bar(names, totals, color=[COLORS[n] for n in names], width=0.55)
+        ax1.set_ylabel("segundos", color=MUTED)
+        for bar, value in zip(bars, totals):
+            ax1.text(bar.get_x() + bar.get_width()/2, value, f"{value:.2f}s",
+                     ha="center", va="bottom", fontsize=10, color=TEXT)
+    else:
+        ax1.text(0.5, 0.5, "Nenhum metodo executado", ha="center", va="center",
+                 transform=ax1.transAxes, color=MUTED)
 
-    # ── 1. Anomaly Rate — todos os métodos ────────────────────────────────────
-    ax1 = fig.add_subplot(gs[1, 0])
-    style(ax1, "Taxa de Anomalia por Método e Threshold")
-    labels_x = ["p90", "p92", "p95", "p97", "p99"]
-    method_colors = {
-        "AE-CPU":  BLUE,  "AE-GPU":  TEAL,
-        "KM-CPU":  AMBER, "KM-GPU":  MINT,
-    }
-    x = np.arange(len(labels_x))
-    width = 0.2
-    offsets = {"AE-CPU": -1.5, "AE-GPU": -0.5, "KM-CPU": 0.5, "KM-GPU": 1.5}
-    plotted = False
-    for name, res in results.items():
-        if res.get("status") != "ok" or "threshold_analysis" not in res:
-            continue
-        rates = [res["threshold_analysis"].get(p, {}).get("anomaly_rate_pct", 0)
-                 for p in labels_x]
-        off = offsets.get(name, 0)
-        ax1.bar(x + off * width, rates, width=width,
-                color=method_colors.get(name, MUTED),
-                edgecolor=DARK, linewidth=0.8, label=name)
-        plotted = True
-    if plotted:
-        ax1.set_xticks(x); ax1.set_xticklabels(labels_x, color=TEXT)
-        ax1.set_ylabel("% anomalias", color=MUTED, fontsize=9)
-        ax1.legend(facecolor=PANEL, edgecolor=GRID, labelcolor=TEXT, fontsize=9)
+    ax2 = fig.add_subplot(gs[0, 1])
+    style(ax2, "Taxa de anomalia no teste (%)")
+    rates = [res.get("anomaly_rate", 0) for _, res in ok_items]
+    if rates:
+        bars = ax2.bar(names, rates, color=[COLORS[n] for n in names], width=0.55)
+        ax2.axhline(5.0, color=GRID, linewidth=1.2, linestyle="--")
+        ax2.set_ylabel("%", color=MUTED)
+        for bar, value in zip(bars, rates):
+            ax2.text(bar.get_x() + bar.get_width()/2, value, f"{value:.1f}%",
+                     ha="center", va="bottom", fontsize=10, color=TEXT)
 
-    # ── 2. Score Distribution — box-style ────────────────────────────────────
-    ax2 = fig.add_subplot(gs[1, 1])
-    style(ax2, "Distribuição dos Scores de Anomalia (p50/p95/p99)")
-    box_data = []
-    box_labels = []
-    box_colors = []
-    for name, res in results.items():
-        if res.get("status") != "ok" or "scores" not in res:
-            continue
-        scores = res["scores"]
-        box_data.append([np.percentile(scores, p) for p in [25, 50, 75, 95, 99]])
-        box_labels.append(name)
-        box_colors.append(method_colors.get(name, MUTED))
+    ax3 = fig.add_subplot(gs[1, 0])
+    style(ax3, "Anomalias detectadas")
+    counts = [res.get("n_anomalies", 0) for _, res in ok_items]
+    if counts:
+        bars = ax3.bar(names, counts, color=[COLORS[n] for n in names], width=0.55)
+        ax3.set_ylabel("fluxos", color=MUTED)
+        for bar, value in zip(bars, counts):
+            ax3.text(bar.get_x() + bar.get_width()/2, value, f"{value:,}",
+                     ha="center", va="bottom", fontsize=10, color=TEXT)
 
-    if box_data:
-        positions = np.arange(len(box_data))
-        for i, (bd, col) in enumerate(zip(box_data, box_colors)):
-            ax2.bar(i, bd[4], color=col, alpha=0.25, edgecolor=DARK, width=0.6)
-            ax2.bar(i, bd[2], color=col, alpha=0.7,  edgecolor=DARK, width=0.6)
-            ax2.plot([i - 0.3, i + 0.3], [bd[1], bd[1]],
-                     color=TEXT, linewidth=2.5, zorder=3)
-            ax2.plot([i - 0.15, i + 0.15], [bd[3], bd[3]],
-                     color=AMBER, linewidth=2, linestyle="--", zorder=3)
-        ax2.set_xticks(positions)
-        ax2.set_xticklabels(box_labels, color=TEXT, fontsize=9)
-        ax2.set_ylabel("Score", color=MUTED, fontsize=9)
-        # Legenda manual
-        legend_els = [
-            mpatches.Patch(color=TEXT, alpha=0.9, label="mediana (p50)"),
-            mpatches.Patch(color=AMBER, alpha=0.9, label="p95 (threshold)"),
-        ]
-        ax2.legend(handles=legend_els, facecolor=PANEL,
-                   edgecolor=GRID, labelcolor=TEXT, fontsize=8)
-
-    # ── 3. Loss Autoencoder por época ─────────────────────────────────────────
-    ax3 = fig.add_subplot(gs[2, 0])
-    style(ax3, "Autoencoder — Loss por Época")
-    for name, col in [("AE-CPU", BLUE), ("AE-GPU", TEAL)]:
-        res = results.get(name, {})
-        if res.get("status") == "ok" and res.get("epoch_losses"):
-            epochs = range(1, len(res["epoch_losses"]) + 1)
-            ax3.plot(epochs, res["epoch_losses"], color=col,
-                     linewidth=2.5, marker="o", markersize=5,
-                     markerfacecolor=TEXT, markeredgecolor=col,
-                     label=name, zorder=3)
-            ax3.fill_between(epochs, res["epoch_losses"], alpha=0.1, color=col)
-    ax3.set_xlabel("Época", color=MUTED, fontsize=9)
-    ax3.set_ylabel("MSE Loss", color=MUTED, fontsize=9)
-    ax3.legend(facecolor=PANEL, edgecolor=GRID, labelcolor=TEXT, fontsize=9)
-    ax3.tick_params(axis="x", colors=TEXT)
-
-    # ── 4. Silhouette e Inércia K-Means ───────────────────────────────────────
-    ax4 = fig.add_subplot(gs[2, 1])
-    style(ax4, "K-Means — Silhouette Score e Inércia")
-    km_names, sil_vals, inertia_vals = [], [], []
-    for name in ["KM-CPU", "KM-GPU"]:
-        res = results.get(name, {})
-        if res.get("status") == "ok":
-            km_names.append(name)
-            sil_vals.append(res.get("quality", {}).get("silhouette") or 0)
-            inertia_vals.append(res.get("inertia", 0))
-    if km_names:
-        x_km = np.arange(len(km_names))
-        ax4_twin = ax4.twinx()
-        ax4_twin.set_facecolor(PANEL)
-        ax4_twin.tick_params(colors=MUTED, labelsize=9)
-        bars_sil = ax4.bar(x_km - 0.2, sil_vals, width=0.35,
-                           color=[AMBER, MINT][:len(km_names)],
-                           edgecolor=DARK, label="Silhouette")
-        bars_in  = ax4_twin.bar(x_km + 0.2, inertia_vals, width=0.35,
-                                color=[BLUE, TEAL][:len(km_names)],
-                                alpha=0.6, edgecolor=DARK, label="Inércia")
-        ax4.set_xticks(x_km)
-        ax4.set_xticklabels(km_names, color=TEXT)
-        ax4.set_ylabel("Silhouette (−1 → +1)", color=AMBER, fontsize=9)
-        ax4_twin.set_ylabel("Inércia", color=BLUE, fontsize=9)
-        for bar, v in zip(bars_sil, sil_vals):
-            ax4.text(bar.get_x() + bar.get_width()/2,
-                     bar.get_height() + 0.005,
-                     f"{v:.4f}", ha="center", color=TEXT, fontsize=9)
-        for bar, v in zip(bars_in, inertia_vals):
-            ax4_twin.text(bar.get_x() + bar.get_width()/2,
-                          bar.get_height() + max(inertia_vals)*0.01,
-                          f"{v:,.0f}", ha="center", color=TEXT, fontsize=9)
-        ax4.grid(axis="y", color=GRID, linestyle="--", linewidth=0.6, alpha=0.5)
-
-    # ── 5. Tabela comparativa ─────────────────────────────────────────────────
-    ax5 = fig.add_subplot(gs[3, :])
-    ax5.set_facecolor(PANEL)
-    for sp in ax5.spines.values(): sp.set_edgecolor(GRID)
-    ax5.set_xticks([]); ax5.set_yticks([])
-    ax5.set_title("Comparativo Completo — Qualidade e Desempenho",
-                  color=TEXT, fontsize=11, fontweight="bold", pad=10)
-
-    hdrs = ["Método", "HW", "Treino(s)", "Infer(s)", "Total(s)",
-            "Speedup", "Anomalias", "Anom%", "Score p95", "Status"]
-    col_x = [0.01, 0.10, 0.19, 0.28, 0.37, 0.46, 0.55, 0.64, 0.73, 0.85]
-    for cx, h in zip(col_x, hdrs):
-        ax5.text(cx, 0.88, h, transform=ax5.transAxes,
-                 color=TEAL, fontsize=9, fontweight="bold", va="top")
-    line = plt.Line2D([0.01, 0.99], [0.78, 0.78],
-                      transform=ax5.transAxes, color=GRID, linewidth=1)
-    ax5.add_line(line)
-
-    # Calcula speedups
-    ae_cpu_t  = results.get("AE-CPU", {}).get("total_s")
-    ae_gpu_t  = results.get("AE-GPU", {}).get("total_s")
-    km_cpu_t  = results.get("KM-CPU", {}).get("total_s")
-    km_gpu_t  = results.get("KM-GPU", {}).get("total_s")
-    ae_sp = f"{ae_cpu_t/ae_gpu_t:.2f}x" if ae_cpu_t and ae_gpu_t else "—"
-    km_sp = f"{km_cpu_t/km_gpu_t:.2f}x" if km_cpu_t and km_gpu_t else "—"
-
-    def fs(v): return f"{v:.3f}" if isinstance(v, float) else "—"
-    def fi(v): return f"{v:,}" if isinstance(v, int) else "—"
-
-    table_rows = [
-        ("AE-CPU",  "CPU", results.get("AE-CPU",{}), "1.00x"),
-        ("AE-GPU",  "GPU", results.get("AE-GPU",{}), ae_sp),
-        ("KM-CPU",  "CPU", results.get("KM-CPU",{}), "1.00x"),
-        ("KM-GPU",  "GPU", results.get("KM-GPU",{}), km_sp),
+    ax4 = fig.add_subplot(gs[1, 1])
+    ax4.axis("off")
+    ax4.set_title("Leitura rapida", fontsize=12, fontweight="bold", color=TEXT, pad=10)
+    summary_lines = [
+        "Threshold: percentil 95 calculado no treino",
+        "Avaliacao: anomalias contadas somente no teste",
+        "TXT: contem etapas, parametros e detalhes por metodo",
+        "PNG: mostra apenas os indicadores principais",
     ]
-    row_ys = [0.62, 0.44, 0.26, 0.08]
+    for idx, line in enumerate(summary_lines):
+        ax4.text(0.02, 0.82 - idx * 0.16, line, transform=ax4.transAxes,
+                 fontsize=11, color=TEXT, va="center")
 
-    for ri, (name, hw, res, sp) in enumerate(table_rows):
-        bg = "#162030" if ri % 2 else "#1B2A3B"
-        rect = mpatches.FancyBboxPatch(
-            (0.005, row_ys[ri]-0.10), 0.99, 0.18,
-            boxstyle="round,pad=0.01", facecolor=bg,
-            edgecolor=GRID, linewidth=0.5,
-            transform=ax5.transAxes, clip_on=False)
-        ax5.add_patch(rect)
-
-        status = res.get("status", "—")
-        vals = [
-            name,
-            hw,
-            fs(res.get("train_s")),
-            fs(res.get("infer_s")),
-            fs(res.get("total_s")),
-            sp,
-            fi(res.get("n_anomalies")),
-            f"{res.get('anomaly_rate', '—'):.1f}%" if isinstance(res.get('anomaly_rate'), float) else "—",
-            f"{res.get('threshold_p95', 0):.4f}" if res.get("status")=="ok" else "—",
-            "✓ ok" if status=="ok" else f"⊘ {status}",
-        ]
-        for ci, (val, cx) in enumerate(zip(vals, col_x)):
-            color = TEXT
-            if ci == 1:   color = BLUE if hw=="CPU" else MINT
-            elif ci == 5: color = AMBER if sp not in ("1.00x","—") else MUTED
-            elif ci == 9: color = MINT if "ok" in val else RED
-            ax5.text(cx, row_ys[ri], val, transform=ax5.transAxes,
-                     color=color, fontsize=8.5, va="center")
-
-    # ── 6. Speedup + Anomaly Rate side-by-side ────────────────────────────────
-    ax6 = fig.add_subplot(gs[4, 0])
-    style(ax6, "Speedup GPU vs CPU")
-    sp_names, sp_vals, sp_cols = [], [], []
-    for algo, cpu_k, gpu_k, col in [("Autoencoder","AE-CPU","AE-GPU",BLUE),
-                                     ("K-Means","KM-CPU","KM-GPU",AMBER)]:
-        ct = results.get(cpu_k, {}).get("total_s")
-        gt = results.get(gpu_k, {}).get("total_s")
-        if ct and gt:
-            sp_names.append(algo)
-            sp_vals.append(round(ct/gt, 2))
-            sp_cols.append(col)
-    if sp_names:
-        bars = ax6.bar(sp_names, sp_vals, color=sp_cols,
-                       edgecolor=DARK, linewidth=1, width=0.45)
-        ax6.axhline(1.0, color=MUTED, linewidth=1.5, linestyle="--", alpha=0.7)
-        ax6.text(len(sp_names)-0.5, 1.05, "CPU baseline",
-                 color=MUTED, fontsize=8)
-        for bar, v in zip(bars, sp_vals):
-            col_label = MINT if v > 1 else RED
-            ax6.text(bar.get_x()+bar.get_width()/2,
-                     bar.get_height()+0.1,
-                     f"{v:.2f}x", ha="center",
-                     color=col_label, fontsize=12, fontweight="bold")
-        ax6.set_ylabel("Speedup (maior = melhor GPU)", color=MUTED, fontsize=9)
-        ax6.tick_params(axis="x", colors=TEXT)
-
-    ax7 = fig.add_subplot(gs[4, 1])
-    style(ax7, "Taxa de Anomalia @ p95 por Método")
-    ar_names, ar_vals, ar_cols = [], [], []
-    for name, col in method_colors.items():
-        res = results.get(name, {})
-        if res.get("status") == "ok":
-            ar_names.append(name)
-            ar_vals.append(res.get("anomaly_rate", 0))
-            ar_cols.append(col)
-    if ar_names:
-        bars = ax7.bar(ar_names, ar_vals, color=ar_cols,
-                       edgecolor=DARK, linewidth=1, width=0.45)
-        ax7.axhline(5.0, color=AMBER, linewidth=1.5, linestyle="--", alpha=0.8)
-        ax7.text(len(ar_names)-1, 5.2, "p95 esperado = 5%",
-                 color=AMBER, fontsize=8)
-        for bar, v in zip(bars, ar_vals):
-            ax7.text(bar.get_x()+bar.get_width()/2,
-                     bar.get_height()+0.1,
-                     f"{v:.1f}%", ha="center", color=TEXT,
-                     fontsize=10, fontweight="bold")
-        ax7.set_ylabel("% de fluxos anômalos", color=MUTED, fontsize=9)
-        ax7.tick_params(axis="x", colors=TEXT)
-
-    fig.patch.set_facecolor(DARK)
-    plt.savefig(out_path, dpi=160, bbox_inches="tight", facecolor=DARK)
+    plt.savefig(out_path, dpi=150, bbox_inches="tight", facecolor=BG)
     plt.close(fig)
-    log.info(f"Relatório visual salvo em : {out_path}")
+    log.info(f"Relatorio visual salvo em : {out_path}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Comparativo unificado Autoencoder + K-Means — CPU vs GPU")
@@ -834,7 +777,11 @@ def main() -> None:
     outdir     = Path(args.outdir)
     cache_file = Path(args.cache_file)
     outdir.mkdir(parents=True, exist_ok=True)
-    log_path   = outdir / "anomaly_compare.log"
+    for old_name in ("anomaly_compare.log", "anomaly_compare.json", "anomaly_compare.csv"):
+        old_path = outdir / old_name
+        if old_path.exists():
+            old_path.unlink()
+    log_path   = outdir / "anomaly_compare.txt"
     log        = setup_logger(log_path)
 
     t_global = time.perf_counter()
@@ -956,59 +903,17 @@ def main() -> None:
             f"{sil_s:>16}"
         )
 
-    # ── Salva JSON + CSV ──────────────────────────────────────────────────────
-    def safe(v):
-        if isinstance(v, np.ndarray): return v.tolist()
-        if isinstance(v, (np.integer,)): return int(v)
-        if isinstance(v, (np.floating,)): return float(v)
-        return v
-
-    payload = {"args": vars(args), "timestamp": datetime.now().isoformat(),
-               "results": {k: {f: safe(v) for f, v in res.items()
-                               if f not in ("scores","labels")}
-                           for k, res in results.items()}}
-
-    json_path = outdir / "anomaly_compare.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
-
-    csv_path = outdir / "anomaly_compare.csv"
-    csv_rows = []
-    for name, res in results.items():
-        if res.get("status") != "ok":
-            continue
-        csv_rows.append({
-            "method": name,
-            "hardware": "GPU" if res["device"]=="cuda" else "CPU",
-            "train_s": res.get("train_s"),
-            "infer_s": res.get("infer_s"),
-            "total_s": res.get("total_s"),
-            "n_anomalies": res.get("n_anomalies"),
-            "anomaly_rate_pct": res.get("anomaly_rate"),
-            "threshold_p95": res.get("threshold_p95"),
-            "final_loss": res.get("final_loss"),
-            "silhouette": res.get("quality", {}).get("silhouette"),
-            "inertia": res.get("inertia"),
-            "n_iter": res.get("n_iter"),
-            "notes": res.get("notes"),
-        })
-    if csv_rows:
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=list(csv_rows[0].keys()))
-            writer.writeheader()
-            writer.writerows(csv_rows)
-
-    log.info(f"JSON : {json_path}")
-    log.info(f"CSV  : {csv_path}")
-
     # ── Relatório visual ──────────────────────────────────────────────────────
     plot_report(results, outdir / "anomaly_report.png", args, log)
 
-    # ── Encerramento ──────────────────────────────────────────────────────────
+    # ── Relatório detalhado em TXT ────────────────────────────────────────────
     total_s = time.perf_counter() - t_global
+    write_text_report(results, log_path, args, total_s, log)
+
+    # ── Encerramento ──────────────────────────────────────────────────────────
     section(log, "CONCLUÍDO")
     log.info(f"Tempo total  : {total_s:.2f}s ({total_s/60:.1f} min)")
-    log.info(f"Log          : {log_path}")
+    log.info(f"TXT detalhado : {log_path}")
     log.info(f"Relatório    : {outdir / 'anomaly_report.png'}")
     log.info("=" * 72)
 

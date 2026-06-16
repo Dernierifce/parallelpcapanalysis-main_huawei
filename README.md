@@ -5,7 +5,7 @@ Pipeline Python para extrair features de fluxos de rede a partir de arquivos `.p
 O fluxo atual é centrado em dois arquivos:
 
 - `feature_extractor.py`: lê arquivos `.pcapng` via PyShark/TShark e gera 22 features por fluxo.
-- `anomaly_compare.py`: executa a extração, cria ou reutiliza cache, separa treino/teste, roda Autoencoder e K-Means em CPU/GPU, e salva logs, métricas e relatório visual.
+- `anomaly_compare.py`: executa a extração, cria ou reutiliza cache, separa treino/teste, roda Autoencoder e K-Means em CPU/GPU, e salva um TXT detalhado com todas as etapas e um relatório visual simplificado.
 
 ## Estrutura Atual
 
@@ -174,10 +174,8 @@ Por padrão, os resultados ficam em `data/results/`:
 | Arquivo | Descrição |
 |---|---|
 | `features_cache.pkl` | Cache com `X_scaled`, `X`, colunas e estatísticas dos arquivos processados |
-| `anomaly_compare.log` | Log detalhado da execução |
-| `anomaly_compare.json` | Métricas completas em JSON |
-| `anomaly_compare.csv` | Resumo tabular dos métodos executados |
-| `anomaly_report.png` | Relatório visual gerado com Matplotlib |
+| `anomaly_compare.txt` | Arquivo principal com log, descrição das etapas, parâmetros essenciais e detalhes por método |
+| `anomaly_report.png` | Relatório visual simplificado, com fundo branco e indicadores essenciais |
 
 ## Métodos Comparados
 
