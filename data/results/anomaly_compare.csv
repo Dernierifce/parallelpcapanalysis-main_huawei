@@ -1,5 +1,0 @@
-method,hardware,train_s,infer_s,total_s,n_anomalies,anomaly_rate_pct,threshold_p95,final_loss,silhouette,inertia,n_iter,notes
-AE-CPU,CPU,3.3957,0.0983,3.494,1000,5.0,0.16811273992061615,0.045737,,,,epochs=20 latent=8 batch=256
-AE-GPU,GPU,4.0028,0.1094,4.1122,1000,5.0,0.10863211005926132,0.025263,,,,epochs=20 latent=8 batch=256
-KM-CPU,CPU,2.1764,0.0007,2.1772,1000,5.0,4.56433629989624,,0.333739310503006,144600.3438,13,k=10 n_iter=13 inertia=144600.34
-KM-GPU,GPU,0.17,0.0004,0.1705,1000,5.0,4.790001392364502,,0.3139849007129669,181020.8438,22,k=10 n_iter=22 inertia=181020.84 (PyTorch GPU)
