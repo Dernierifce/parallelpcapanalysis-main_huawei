@@ -5,7 +5,7 @@ Pipeline Python para extrair features de fluxos de rede a partir de arquivos `.p
 O fluxo atual é centrado em dois arquivos:
 
 - `feature_extractor.py`: lê arquivos `.pcapng` via PyShark/TShark e gera 22 features por fluxo.
-- `anomaly_compare.py`: executa a extração, cria ou reutiliza cache, roda Autoencoder e K-Means em CPU/GPU, e salva logs, métricas e relatório visual.
+- `anomaly_compare.py`: executa a extração, cria ou reutiliza cache, separa treino/teste, roda Autoencoder e K-Means em CPU/GPU, e salva logs, métricas e relatório visual.
 
 ## Estrutura Atual
 
@@ -99,6 +99,12 @@ Salvar resultados em outro diretório:
 python anomaly_compare.py --outdir .\data\results\exp_01
 ```
 
+Reservar uma fração diferente para teste:
+
+```powershell
+python anomaly_compare.py --skip-extraction --test-size 0.25
+```
+
 ### Extrair features de um único arquivo
 
 Para testar somente a extração:
@@ -122,6 +128,7 @@ python feature_extractor.py .\data\pcaps\arquivo.pcapng
 | `--ae-lr` | `0.001` | Taxa de aprendizado do Autoencoder |
 | `--kmeans-clusters` | `8` | Número de clusters do K-Means |
 | `--kmeans-max-iter` | `300` | Iterações máximas do K-Means |
+| `--test-size` | `0.30` | Fração dos dados reservada para teste |
 
 ## Features Extraídas
 
@@ -174,17 +181,19 @@ Por padrão, os resultados ficam em `data/results/`:
 
 ## Métodos Comparados
 
+Antes de treinar os métodos, o `anomaly_compare.py` divide as amostras em treino e teste com seed fixa (`random_state=42`). O threshold p95 é calculado somente no conjunto de treino e a detecção de anomalias é avaliada no conjunto de teste, evitando data leakage.
+
 ### Autoencoder
 
-Implementado em PyTorch. Usa erro de reconstrução como score de anomalia e threshold no percentil 95 por padrão.
+Implementado em PyTorch. Treina com o conjunto de treino, usa erro de reconstrução como score de anomalia e aplica no teste o threshold p95 calculado sobre os erros de treino.
 
 ### K-Means CPU
 
-Implementado com `scikit-learn`, usando `KMeans(n_init=10, random_state=42)`.
+Implementado com `scikit-learn`, usando `KMeans(n_init=10, random_state=42)`. O modelo é ajustado no conjunto de treino e avaliado pelas distâncias ao centroide mais próximo no teste.
 
 ### K-Means GPU
 
-Implementação própria em PyTorch, usando `torch.cdist` e inicialização estilo k-means++ na GPU. Não depende de cuML/RAPIDS.
+Implementação própria em PyTorch, usando `torch.cdist` e inicialização estilo k-means++ na GPU. Também treina somente no conjunto de treino, avalia no teste e não depende de cuML/RAPIDS.
 
 ## Solução de Problemas
 

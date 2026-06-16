@@ -18,7 +18,7 @@ Métricas de desempenho:
 Uso:
     python anomaly_compare.py
     python anomaly_compare.py --skip-extraction --gpu
-    python anomaly_compare.py --skip-extraction --gpu --sample-size 20000
+    python anomaly_compare.py --skip-extraction --gpu --sample-size 20000 --test-size 0.30
     python anomaly_compare.py --skip-extraction --gpu --ae-epochs 30 --kmeans-clusters 10
 
 Dependências:
@@ -42,6 +42,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.metrics import silhouette_score
+from sklearn.model_selection import train_test_split
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
 
@@ -242,8 +243,8 @@ def _sync(device: str) -> None:
         torch.cuda.synchronize()
 
 
-def run_autoencoder(X: np.ndarray, device: str, epochs: int,
-                    batch_size: int, latent_dim: int, lr: float,
+def run_autoencoder(X_train: np.ndarray, X_test: np.ndarray, device: str,
+                    epochs: int, batch_size: int, latent_dim: int, lr: float,
                     log: logging.Logger) -> dict:
     if not TORCH_OK:
         return {"status": "error", "notes": "PyTorch não disponível"}
@@ -253,18 +254,21 @@ def run_autoencoder(X: np.ndarray, device: str, epochs: int,
     log.info(f"  Batch size  : {batch_size}")
     log.info(f"  Latent dim  : {latent_dim}")
     log.info(f"  LR          : {lr}")
-    log.info(f"  Amostras    : {len(X):,}")
+    log.info(f"  Treino      : {len(X_train):,} amostras")
+    log.info(f"  Teste       : {len(X_test):,} amostras")
 
-    model = Autoencoder(X.shape[1], latent_dim).to(device)
-    opt   = torch.optim.Adam(model.parameters(), lr=lr)
+    model   = Autoencoder(X_train.shape[1], latent_dim).to(device)
+    opt     = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.MSELoss()
-    tensor_X = torch.from_numpy(X.astype(np.float32))
-    loader_tr = DataLoader(TensorDataset(tensor_X), batch_size=batch_size,
+
+    tensor_train = torch.from_numpy(X_train.astype(np.float32))
+    tensor_test  = torch.from_numpy(X_test.astype(np.float32))
+    loader_tr = DataLoader(TensorDataset(tensor_train), batch_size=batch_size,
                            shuffle=True,  pin_memory=(device=="cuda"))
-    loader_in = DataLoader(TensorDataset(tensor_X), batch_size=batch_size,
+    loader_te = DataLoader(TensorDataset(tensor_test),  batch_size=batch_size,
                            shuffle=False, pin_memory=(device=="cuda"))
 
-    # ── Treino ────────────────────────────────────────────────────────────────
+    # ── Treino (apenas X_train) ───────────────────────────────────────────────
     _sync(device)
     t_train = time.perf_counter()
     epoch_losses = []
@@ -277,57 +281,69 @@ def run_autoencoder(X: np.ndarray, device: str, epochs: int,
             loss  = loss_fn(recon, batch)
             opt.zero_grad(); loss.backward(); opt.step()
             ep_loss += loss.item() * len(batch)
-        avg = ep_loss / len(X)
+        avg = ep_loss / len(X_train)
         epoch_losses.append(avg)
         log.info(f"  [AE-{device.upper()}] Época {epoch:>3}/{epochs} | loss={avg:.6f}")
     _sync(device)
     train_s = time.perf_counter() - t_train
 
-    # ── Inferência ────────────────────────────────────────────────────────────
-    _sync(device)
-    t_infer = time.perf_counter()
+    # ── Threshold definido nos erros de TREINO (sem leakage) ─────────────────
     model.eval()
-    errors: list[np.ndarray] = []
+    train_errors_list: list[np.ndarray] = []
     with torch.no_grad():
-        for (batch,) in loader_in:
+        for (batch,) in loader_tr:
             batch = batch.to(device, non_blocking=(device=="cuda"))
             recon = model(batch)
-            errors.append(((recon - batch)**2).mean(dim=1).cpu().numpy())
+            train_errors_list.append(((recon - batch)**2).mean(dim=1).cpu().numpy())
+    train_errors = np.concatenate(train_errors_list)
+    threshold = float(np.percentile(train_errors, 95))
+    log.info(f"  Threshold p95 (treino) : {threshold:.6f}")
+
+    # ── Inferência em X_test (dados nunca vistos) ─────────────────────────────
+    _sync(device)
+    t_infer = time.perf_counter()
+    test_errors: list[np.ndarray] = []
+    with torch.no_grad():
+        for (batch,) in loader_te:
+            batch = batch.to(device, non_blocking=(device=="cuda"))
+            recon = model(batch)
+            test_errors.append(((recon - batch)**2).mean(dim=1).cpu().numpy())
     _sync(device)
     infer_s = time.perf_counter() - t_infer
 
-    scores = np.concatenate(errors)
+    scores = np.concatenate(test_errors)
     log.info(f"  Treino      : {train_s:.3f}s")
     log.info(f"  Inferência  : {infer_s:.3f}s")
 
-    # ── Qualidade ─────────────────────────────────────────────────────────────
+    # ── Qualidade no conjunto de TESTE ────────────────────────────────────────
     log.info("")
+    log.info("  [Scores no conjunto de TESTE — dados não vistos no treino]")
     score_dist  = score_distribution(scores, f"AE-{device.upper()}", log)
     thresh_anal = anomaly_rate_analysis(scores, f"AE-{device.upper()}", log)
 
-    # Threshold padrão p95
-    threshold = float(np.percentile(scores, 95))
     labels    = (scores > threshold).astype(int)
     n_anom    = int(labels.sum())
     anom_rate = n_anom / len(scores) * 100
-
-    log.info(f"  Anomalias detectadas (p95) : {n_anom:,} ({anom_rate:.2f}%)")
+    log.info(f"  Anomalias detectadas (p95 do treino) : {n_anom:,} ({anom_rate:.2f}%)")
 
     return {
-        "status":        "ok",
-        "device":        device,
-        "train_s":       round(train_s, 4),
-        "infer_s":       round(infer_s, 4),
-        "total_s":       round(train_s + infer_s, 4),
-        "epoch_losses":  [round(l, 6) for l in epoch_losses],
-        "final_loss":    round(epoch_losses[-1], 6),
-        "scores":        scores,
-        "threshold_p95": threshold,
-        "n_anomalies":   n_anom,
-        "anomaly_rate":  round(anom_rate, 2),
-        "score_dist":    score_dist,
+        "status":           "ok",
+        "device":           device,
+        "train_s":          round(train_s, 4),
+        "infer_s":          round(infer_s, 4),
+        "total_s":          round(train_s + infer_s, 4),
+        "epoch_losses":     [round(l, 6) for l in epoch_losses],
+        "final_loss":       round(epoch_losses[-1], 6),
+        "train_final_loss": round(float(train_errors.mean()), 6),
+        "scores":           scores,
+        "threshold_p95":    threshold,
+        "n_train":          len(X_train),
+        "n_test":           len(X_test),
+        "n_anomalies":      n_anom,
+        "anomaly_rate":     round(anom_rate, 2),
+        "score_dist":       score_dist,
         "threshold_analysis": thresh_anal,
-        "notes":         f"epochs={epochs} latent={latent_dim} batch={batch_size}",
+        "notes":            f"epochs={epochs} latent={latent_dim} batch={batch_size} train={len(X_train)} test={len(X_test)}",
     }
 
 
@@ -335,41 +351,48 @@ def run_autoencoder(X: np.ndarray, device: str, epochs: int,
 # K-MEANS CPU
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_kmeans_cpu(X: np.ndarray, k: int, max_iter: int,
-                   log: logging.Logger) -> dict:
+def run_kmeans_cpu(X_train: np.ndarray, X_test: np.ndarray, k: int,
+                   max_iter: int, log: logging.Logger) -> dict:
     log.info(f"  Device    : CPU (scikit-learn)")
     log.info(f"  k         : {k}")
     log.info(f"  max_iter  : {max_iter}")
-    log.info(f"  Amostras  : {len(X):,}")
+    log.info(f"  Treino    : {len(X_train):,} amostras")
+    log.info(f"  Teste     : {len(X_test):,} amostras")
 
     model = KMeans(n_clusters=k, max_iter=max_iter, n_init=10, random_state=42)
 
+    # ── Treino (apenas X_train) ───────────────────────────────────────────────
     t0 = time.perf_counter()
-    model.fit(X)
+    model.fit(X_train)
     train_s = time.perf_counter() - t0
 
-    t1 = time.perf_counter()
-    labels = model.predict(X)
-    infer_s = time.perf_counter() - t1
-
-    # Score de anomalia: distância ao centroide mais próximo
-    centroids = model.cluster_centers_
-    dists = np.linalg.norm(X - centroids[labels], axis=1)
-
+    # ── Threshold no X_train (sem leakage) ───────────────────────────────────
+    centroids    = model.cluster_centers_
+    train_labels = model.predict(X_train)
+    train_dists  = np.linalg.norm(X_train - centroids[train_labels], axis=1)
+    threshold    = float(np.percentile(train_dists, 95))
     log.info(f"  Iterações : {model.n_iter_} / {max_iter}")
     log.info(f"  Inércia   : {model.inertia_:.4f}")
+    log.info(f"  Threshold p95 (treino) : {threshold:.6f}")
     log.info(f"  Treino    : {train_s:.3f}s")
+
+    # ── Inferência em X_test (dados nunca vistos) ─────────────────────────────
+    t1 = time.perf_counter()
+    labels = model.predict(X_test)
+    infer_s = time.perf_counter() - t1
+    dists   = np.linalg.norm(X_test - centroids[labels], axis=1)
     log.info(f"  Inferência: {infer_s:.4f}s")
 
+    # ── Qualidade no conjunto de TESTE ────────────────────────────────────────
     log.info("")
-    quality     = kmeans_quality(X, labels, log)
+    log.info("  [Scores no conjunto de TESTE — dados não vistos no treino]")
+    quality     = kmeans_quality(X_test, labels, log)
     score_dist  = score_distribution(dists, "KM-CPU", log)
     thresh_anal = anomaly_rate_analysis(dists, "KM-CPU", log)
 
-    threshold = float(np.percentile(dists, 95))
     n_anom    = int((dists > threshold).sum())
     anom_rate = n_anom / len(dists) * 100
-    log.info(f"  Anomalias detectadas (p95) : {n_anom:,} ({anom_rate:.2f}%)")
+    log.info(f"  Anomalias detectadas (p95 do treino) : {n_anom:,} ({anom_rate:.2f}%)")
 
     return {
         "status":        "ok",
@@ -382,12 +405,14 @@ def run_kmeans_cpu(X: np.ndarray, k: int, max_iter: int,
         "labels":        labels,
         "scores":        dists,
         "threshold_p95": threshold,
+        "n_train":       len(X_train),
+        "n_test":        len(X_test),
         "n_anomalies":   n_anom,
         "anomaly_rate":  round(anom_rate, 2),
         "score_dist":    score_dist,
         "threshold_analysis": thresh_anal,
         "quality":       quality,
-        "notes":         f"k={k} n_iter={model.n_iter_} inertia={model.inertia_:.2f}",
+        "notes":         f"k={k} n_iter={model.n_iter_} inertia={model.inertia_:.2f} train={len(X_train)} test={len(X_test)}",
     }
 
 
@@ -395,44 +420,45 @@ def run_kmeans_cpu(X: np.ndarray, k: int, max_iter: int,
 # K-MEANS GPU (PyTorch puro)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_kmeans_gpu(X: np.ndarray, k: int, max_iter: int,
-                   log: logging.Logger) -> dict:
+def run_kmeans_gpu(X_train: np.ndarray, X_test: np.ndarray, k: int,
+                   max_iter: int, log: logging.Logger) -> dict:
     if not TORCH_OK or not torch.cuda.is_available():
         msg = "CUDA não disponível"
         log.warning(f"  {msg}")
         return {"status": "unavailable", "notes": msg}
 
-    device = "cuda"
+    device   = "cuda"
     gpu_name = torch.cuda.get_device_name(0)
     log.info(f"  Device    : GPU — {gpu_name}")
     log.info(f"  k         : {k}")
     log.info(f"  max_iter  : {max_iter}")
-    log.info(f"  Amostras  : {len(X):,}")
+    log.info(f"  Treino    : {len(X_train):,} amostras")
+    log.info(f"  Teste     : {len(X_test):,} amostras")
 
-    X_t = torch.from_numpy(X.astype(np.float32)).to(device)
-    rng = torch.Generator(device=device); rng.manual_seed(42)
+    X_tr = torch.from_numpy(X_train.astype(np.float32)).to(device)
+    X_te = torch.from_numpy(X_test.astype(np.float32)).to(device)
+    rng  = torch.Generator(device=device); rng.manual_seed(42)
 
-    # ── kmeans++ na GPU ───────────────────────────────────────────────────────
+    # ── kmeans++ na GPU (treino apenas em X_train) ────────────────────────────
     torch.cuda.synchronize()
     t_train = time.perf_counter()
 
-    idx0 = torch.randint(0, X_t.shape[0], (1,), generator=rng, device=device).item()
-    centroids = X_t[idx0].unsqueeze(0)
+    idx0      = torch.randint(0, X_tr.shape[0], (1,), generator=rng, device=device).item()
+    centroids = X_tr[idx0].unsqueeze(0)
     for _ in range(1, k):
-        d = torch.cdist(X_t, centroids).min(dim=1).values
+        d    = torch.cdist(X_tr, centroids).min(dim=1).values
         prob = d / d.sum()
-        idx = torch.multinomial(prob, 1, generator=rng).item()
-        centroids = torch.cat([centroids, X_t[idx].unsqueeze(0)], dim=0)
+        idx  = torch.multinomial(prob, 1, generator=rng).item()
+        centroids = torch.cat([centroids, X_tr[idx].unsqueeze(0)], dim=0)
 
-    labels_t = torch.zeros(X_t.shape[0], dtype=torch.long, device=device)
+    labels_t        = torch.zeros(X_tr.shape[0], dtype=torch.long, device=device)
     inertia_history = []
 
     for iteration in range(max_iter):
-        dists_all  = torch.cdist(X_t, centroids)
+        dists_all  = torch.cdist(X_tr, centroids)
         new_labels = dists_all.argmin(dim=1)
         inertia    = dists_all.min(dim=1).values.pow(2).sum().item()
         inertia_history.append(inertia)
-
         if iteration > 0 and torch.equal(new_labels, labels_t):
             log.info(f"  Convergiu em {iteration + 1} iterações")
             labels_t = new_labels
@@ -441,38 +467,43 @@ def run_kmeans_gpu(X: np.ndarray, k: int, max_iter: int,
         for ki in range(k):
             mask = labels_t == ki
             if mask.any():
-                centroids[ki] = X_t[mask].mean(dim=0)
+                centroids[ki] = X_tr[mask].mean(dim=0)
 
     torch.cuda.synchronize()
     train_s = time.perf_counter() - t_train
 
-    # ── Inferência ────────────────────────────────────────────────────────────
-    torch.cuda.synchronize()
-    t_infer = time.perf_counter()
-    dists_final  = torch.cdist(X_t, centroids)
-    labels_final = dists_final.argmin(dim=1)
-    dists_min    = dists_final.min(dim=1).values
-    torch.cuda.synchronize()
-    infer_s = time.perf_counter() - t_infer
+    # ── Threshold calculado no X_train (sem leakage) ──────────────────────────
+    train_dists = torch.cdist(X_tr, centroids).min(dim=1).values.cpu().numpy()
+    threshold   = float(np.percentile(train_dists, 95))
+    log.info(f"  Iterações : {len(inertia_history)} / {max_iter}")
+    log.info(f"  Inércia   : {inertia_history[-1]:.4f}")
+    log.info(f"  Threshold p95 (treino) : {threshold:.6f}")
+    log.info(f"  Treino    : {train_s:.3f}s")
 
+    # ── Inferência em X_test (dados nunca vistos) ─────────────────────────────
+    torch.cuda.synchronize()
+    t_infer      = time.perf_counter()
+    dists_test   = torch.cdist(X_te, centroids)
+    labels_final = dists_test.argmin(dim=1)
+    dists_min    = dists_test.min(dim=1).values
+    torch.cuda.synchronize()
+    infer_s   = time.perf_counter() - t_infer
     labels_np = labels_final.cpu().numpy()
     scores_np = dists_min.cpu().numpy()
-    inertia_final = float(inertia_history[-1])
 
-    log.info(f"  Iterações : {len(inertia_history)} / {max_iter}")
-    log.info(f"  Inércia   : {inertia_final:.4f}")
-    log.info(f"  Treino    : {train_s:.3f}s")
     log.info(f"  Inferência: {infer_s:.4f}s")
 
+    # ── Qualidade no conjunto de TESTE ────────────────────────────────────────
     log.info("")
-    quality     = kmeans_quality(X, labels_np, log)
+    log.info("  [Scores no conjunto de TESTE — dados não vistos no treino]")
+    quality     = kmeans_quality(X_test, labels_np, log)
     score_dist  = score_distribution(scores_np, "KM-GPU", log)
     thresh_anal = anomaly_rate_analysis(scores_np, "KM-GPU", log)
 
-    threshold = float(np.percentile(scores_np, 95))
     n_anom    = int((scores_np > threshold).sum())
     anom_rate = n_anom / len(scores_np) * 100
-    log.info(f"  Anomalias detectadas (p95) : {n_anom:,} ({anom_rate:.2f}%)")
+    inertia_final = float(inertia_history[-1])
+    log.info(f"  Anomalias detectadas (p95 do treino) : {n_anom:,} ({anom_rate:.2f}%)")
 
     return {
         "status":        "ok",
@@ -485,12 +516,14 @@ def run_kmeans_gpu(X: np.ndarray, k: int, max_iter: int,
         "labels":        labels_np,
         "scores":        scores_np,
         "threshold_p95": threshold,
+        "n_train":       len(X_train),
+        "n_test":        len(X_test),
         "n_anomalies":   n_anom,
         "anomaly_rate":  round(anom_rate, 2),
         "score_dist":    score_dist,
         "threshold_analysis": thresh_anal,
         "quality":       quality,
-        "notes":         f"k={k} n_iter={len(inertia_history)} inertia={inertia_final:.2f} (PyTorch GPU)",
+        "notes":         f"k={k} n_iter={len(inertia_history)} inertia={inertia_final:.2f} train={len(X_train)} test={len(X_test)} (PyTorch GPU)",
     }
 
 
@@ -794,6 +827,8 @@ def main() -> None:
     parser.add_argument("--ae-lr",            type=float, default=1e-3)
     parser.add_argument("--kmeans-clusters",  type=int,   default=8)
     parser.add_argument("--kmeans-max-iter",  type=int,   default=300)
+    parser.add_argument("--test-size",        type=float, default=0.30,
+                        help="Fração dos dados reservada para teste (padrão: 0.30)")
     args = parser.parse_args()
 
     outdir     = Path(args.outdir)
@@ -840,19 +875,32 @@ def main() -> None:
         X = X[idx]
         log.info(f"Amostrado para  : {len(X):,}")
 
+    # ── Divisão treino / teste ────────────────────────────────────────────────
+    section(log, "DIVISÃO TREINO / TESTE")
+    X_train, X_test = train_test_split(
+        X, test_size=args.test_size, random_state=42, shuffle=True)
+    log.info(f"Total de amostras : {len(X):,}")
+    log.info(f"Treino            : {len(X_train):,} ({1-args.test_size:.0%})")
+    log.info(f"Teste             : {len(X_test):,}  ({args.test_size:.0%})")
+    log.info(f"Seed              : 42 (reproduzível)")
+    log.info("")
+    log.info("  O threshold será calculado APENAS no conjunto de treino.")
+    log.info("  As anomalias serão detectadas APENAS no conjunto de teste.")
+    log.info("  Isso evita data leakage e garante avaliação realista.")
+
     results: dict = {}
 
     # ── Autoencoder CPU ───────────────────────────────────────────────────────
     section(log, "AUTOENCODER — CPU")
     results["AE-CPU"] = run_autoencoder(
-        X, "cpu", args.ae_epochs, args.ae_batch_size,
+        X_train, X_test, "cpu", args.ae_epochs, args.ae_batch_size,
         args.ae_latent_dim, args.ae_lr, log)
 
     # ── Autoencoder GPU ───────────────────────────────────────────────────────
     section(log, "AUTOENCODER — GPU")
     if args.gpu and gpu_ok:
         results["AE-GPU"] = run_autoencoder(
-            X, "cuda", args.ae_epochs, args.ae_batch_size,
+            X_train, X_test, "cuda", args.ae_epochs, args.ae_batch_size,
             args.ae_latent_dim, args.ae_lr, log)
         ae_sp = results["AE-CPU"]["total_s"] / results["AE-GPU"]["total_s"]
         log.info(f"  Speedup GPU vs CPU : {ae_sp:.2f}x")
@@ -864,13 +912,13 @@ def main() -> None:
     # ── K-Means CPU ───────────────────────────────────────────────────────────
     section(log, "K-MEANS — CPU")
     results["KM-CPU"] = run_kmeans_cpu(
-        X, args.kmeans_clusters, args.kmeans_max_iter, log)
+        X_train, X_test, args.kmeans_clusters, args.kmeans_max_iter, log)
 
     # ── K-Means GPU ───────────────────────────────────────────────────────────
     section(log, "K-MEANS — GPU")
     if args.gpu and gpu_ok:
         results["KM-GPU"] = run_kmeans_gpu(
-            X, args.kmeans_clusters, args.kmeans_max_iter, log)
+            X_train, X_test, args.kmeans_clusters, args.kmeans_max_iter, log)
         km_sp = results["KM-CPU"]["total_s"] / results["KM-GPU"]["total_s"]
         log.info(f"  Speedup GPU vs CPU : {km_sp:.2f}x")
     else:
