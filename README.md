@@ -1,4 +1,4 @@
-# Parallel PCAP Analysis
+# Anomaly Detection Network IFCE26
 
 Pipeline Python para extrair features de fluxos de rede a partir de arquivos `.pcapng` e comparar métodos de detecção de anomalias em CPU e GPU.
 
@@ -10,7 +10,7 @@ O fluxo atual é centrado em dois arquivos:
 ## Estrutura Atual
 
 ```text
-parallelpcapanalysis-main_huawei/
+Anomaly_Detection_Network-IFCE26/
 ├── anomaly_compare.py
 ├── feature_extractor.py
 ├── requirements.txt
